@@ -11,6 +11,7 @@ import Builders from "@/pages/Builders";
 import Library from "@/pages/Library";
 import SignIn from "@/pages/SignIn";
 import SignUp from "@/pages/SignUp";
+import Admin from "@/pages/Admin";
 import NotFound from "@/pages/NotFound";
 
 export default function App() {
@@ -59,6 +60,14 @@ export default function App() {
             element={
               <RequireAuth requireRole="pro">
                 <Library />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <RequireAuth requireRole="admin">
+                <Admin />
               </RequireAuth>
             }
           />

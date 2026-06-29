@@ -102,8 +102,20 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["builder_directory"]["Insert"]>;
       };
     };
+    Views: {
+      profile_with_role: {
+        Row: {
+          id: string;
+          email: string;
+          full_name: string | null;
+          created_at: string;
+          role: Role;
+        };
+      };
+    };
     Functions: {
       has_role: { Args: { _user_id: string; _role: Role }; Returns: boolean };
+      set_user_role: { Args: { _target: string; _role: Role }; Returns: void };
     };
   };
 }

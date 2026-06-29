@@ -12,7 +12,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { compsProvider, type CompRecord } from "@/providers/comps";
 import { fmtMoney, fmtNumber } from "@/lib/format";
-import { Download, ArrowRight, Search, Sparkles } from "lucide-react";
+import { geocode } from "@/lib/geocode";
+import { Download, ArrowRight, Search, Sparkles, MapPin } from "lucide-react";
 
 function percentile(xs: number[], p: number) {
   if (xs.length === 0) return 0;
@@ -27,12 +28,20 @@ export default function Comps() {
   const [radius, setRadius] = React.useState(3);
   const [comps, setComps] = React.useState<CompRecord[]>([]);
   const [loading, setLoading] = React.useState(false);
+  const [center, setCenter] = React.useState<{ lat: number; lng: number; label: string } | null>(null);
 
   const runSearch = React.useCallback(async () => {
     setLoading(true);
     try {
+      const geo = await geocode(address);
+      if (!geo) {
+        toast.error("Couldn't geocode that address. Try a metro name.");
+        setLoading(false);
+        return;
+      }
+      setCenter({ lat: geo.lat, lng: geo.lng, label: geo.name });
       const result = await compsProvider.search({
-        center: { lat: 30.2672, lng: -97.7431 }, // TODO: geocode `address` via mapbox edge function
+        center: { lat: geo.lat, lng: geo.lng },
         radiusMi: radius,
         monthsBack: 12,
         newConstructionOnly: true,
@@ -44,9 +53,9 @@ export default function Comps() {
     } finally {
       setLoading(false);
     }
-  }, [radius]);
+  }, [address, radius]);
 
-  React.useEffect(() => { runSearch(); }, [runSearch]);
+  React.useEffect(() => { runSearch(); /* run on mount only */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ppsfValues = comps.map((c) => c.pricePerSqft).filter((v): v is number => v != null);
   const stats = {
@@ -115,7 +124,14 @@ export default function Comps() {
             <Label htmlFor="addr">Search area</Label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input id="addr" className="pl-9" value={address} onChange={(e) => setAddress(e.target.value)} />
+              <Input
+                id="addr"
+                className="pl-9"
+                placeholder="2421 E 5th St, Austin, TX or Nashville, TN"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
+              />
             </div>
           </div>
           <div className="space-y-1.5">
@@ -126,6 +142,16 @@ export default function Comps() {
             {loading ? "Searching…" : "Search"}
           </Button>
         </CardContent>
+        {center && (
+          <div className="px-5 pb-4 flex items-center gap-2 text-xs text-muted-foreground">
+            <MapPin className="h-3 w-3 text-gold" />
+            <span>
+              Centered on <span className="text-foreground font-medium">{center.label}</span>
+              {" · "}
+              {center.lat.toFixed(4)}, {center.lng.toFixed(4)}
+            </span>
+          </div>
+        )}
       </Card>
 
       {/* Stats */}

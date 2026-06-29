@@ -26,8 +26,9 @@ const NAV = [
 ];
 
 export function Header() {
-  const { user, signOut } = useAuth();
+  const { user, role, signOut } = useAuth();
   const navigate = useNavigate();
+  const isAdmin = role === "admin";
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-border/60 bg-background/80 backdrop-blur-md">
@@ -51,6 +52,19 @@ export function Header() {
                 {item.label}
               </NavLink>
             ))}
+            {isAdmin && (
+              <NavLink
+                to="/admin"
+                className={({ isActive }) =>
+                  cn(
+                    "text-sm font-medium transition-colors flex items-center gap-1",
+                    isActive ? "text-gold" : "text-muted-foreground hover:text-gold",
+                  )
+                }
+              >
+                Admin
+              </NavLink>
+            )}
           </nav>
         </div>
         <div className="flex items-center gap-3">
