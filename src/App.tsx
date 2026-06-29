@@ -25,14 +25,9 @@ export default function App() {
           <Route path="/sign-in" element={<SignIn />} />
           <Route path="/sign-up" element={<SignUp />} />
           <Route path="/billing/success" element={<BillingSuccess />} />
-          <Route
-            path="/deal-analyzer"
-            element={
-              <RequireAuth requireRole="pro">
-                <DealAnalyzer />
-              </RequireAuth>
-            }
-          />
+          {/* Public: the Deal Analyzer is the free, client-side "try it" tool.
+              Only "Save Deal" requires an account. */}
+          <Route path="/deal-analyzer" element={<DealAnalyzer />} />
           <Route
             path="/map"
             element={
