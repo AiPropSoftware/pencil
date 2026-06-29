@@ -12,3 +12,7 @@ dist-ssr
 !.vscode/settings.json
 coverage
 .supabase
+
+# TypeScript build cache
+tsconfig.tsbuildinfo
+*.tsbuildinfo
