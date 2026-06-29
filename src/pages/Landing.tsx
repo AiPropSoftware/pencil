@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { UpgradeButton } from "@/components/UpgradeButton";
 import {
   Calculator, Map as MapIcon, BarChart3, HardHat,
   ArrowRight, Check, TrendingUp, FileText, Sparkles,
@@ -164,9 +165,7 @@ export default function Landing() {
                 Pencil Pro is $149/month. One avoided bad deal pays for it for the next decade.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
-                <Button size="lg" variant="gold" asChild>
-                  <Link to="/sign-up">Start free trial <ArrowRight className="h-4 w-4" /></Link>
-                </Button>
+                <UpgradeButton size="lg">Start Pro · $149/mo</UpgradeButton>
                 <Button size="lg" variant="outline" className="bg-transparent border-background/30 text-background hover:bg-background/10 hover:text-background" asChild>
                   <Link to="/deal-analyzer">Try the Deal Analyzer</Link>
                 </Button>

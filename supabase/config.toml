@@ -14,3 +14,9 @@ verify_jwt = true
 
 [functions.builder-search]
 verify_jwt = true
+
+[functions.stripe-checkout]
+verify_jwt = true
+
+[functions.stripe-webhook]
+verify_jwt = false

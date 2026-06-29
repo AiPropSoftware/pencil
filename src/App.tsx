@@ -12,6 +12,7 @@ import Library from "@/pages/Library";
 import SignIn from "@/pages/SignIn";
 import SignUp from "@/pages/SignUp";
 import Admin from "@/pages/Admin";
+import BillingSuccess from "@/pages/BillingSuccess";
 import NotFound from "@/pages/NotFound";
 
 export default function App() {
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/sign-in" element={<SignIn />} />
           <Route path="/sign-up" element={<SignUp />} />
+          <Route path="/billing/success" element={<BillingSuccess />} />
           <Route
             path="/deal-analyzer"
             element={
