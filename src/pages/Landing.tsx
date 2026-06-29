@@ -68,7 +68,7 @@ export default function Landing() {
                 </Link>
               </Button>
               <Button size="lg" variant="outline" asChild>
-                <Link to="/deal-analyzer">Try the Deal Analyzer</Link>
+                <Link to="/map">Explore the development map</Link>
               </Button>
             </div>
             <ul className="mt-10 grid sm:grid-cols-2 gap-x-6 gap-y-2.5">
@@ -168,7 +168,7 @@ export default function Landing() {
                   <Link to="/sign-up">Sign up <ArrowRight className="h-4 w-4" /></Link>
                 </Button>
                 <Button size="lg" variant="outline" className="bg-transparent border-background/30 text-background hover:bg-background/10 hover:text-background" asChild>
-                  <Link to="/deal-analyzer">Try the Deal Analyzer</Link>
+                  <Link to="/map">Explore the development map</Link>
                 </Button>
               </div>
             </div>

@@ -1,404 +1,304 @@
 import * as React from "react";
-import mapboxgl, { Map as MbxMap, Marker } from "mapbox-gl";
-import MapboxDraw from "@mapbox/mapbox-gl-draw";
-import "mapbox-gl/dist/mapbox-gl.css";
-import "@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css";
-import { toast } from "sonner";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import { Link } from "react-router-dom";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { fmtMoney, fmtNumber } from "@/lib/format";
 import {
-  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
-import { MAPBOX_TOKEN, DEFAULT_CENTER, DEFAULT_ZOOM, mapStyle } from "@/providers/maps/mapbox";
-import { permitsProvider, type PermitRecord } from "@/providers/permits";
-import { getSupabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
-import { fmtMoney } from "@/lib/format";
-import { MapPin, Layers, Pencil as PencilIcon, Search, Trash2, Save, Eye } from "lucide-react";
+  developments, summarize, PRODUCT_TYPES, STATUSES, TYPE_COLOR,
+  type Development, type ProductType, type DevStatus,
+} from "@/data/developments";
+import { Search, X, ArrowRight, Building2, CalendarDays, Ruler, Layers3 } from "lucide-react";
 
-interface Developer {
-  id: string;
-  name: string;
-  activeProjects: number;
-  productType: string;
-  contactUrl: string;
-  lat: number;
-  lng: number;
-}
+const US_CENTER: [number, number] = [39.5, -98.35];
+const US_ZOOM = 4.4;
 
-interface SavedPolygon {
-  id: string;
-  name: string;
-  geojson: GeoJSON.Polygon;
-  created_at: string;
+/** Imperatively fly the map to a development when selected from the list. */
+function FlyTo({ target }: { target: Development | null }) {
+  const map = useMap();
+  React.useEffect(() => {
+    if (target) map.flyTo([target.lat, target.lng], 12, { duration: 0.8 });
+  }, [target, map]);
+  return null;
 }
 
 export default function MapPage() {
-  const { user } = useAuth();
-  const mapContainer = React.useRef<HTMLDivElement>(null);
-  const mapRef = React.useRef<MbxMap | null>(null);
-  const drawRef = React.useRef<MapboxDraw | null>(null);
-
-  const [permits, setPermits] = React.useState<PermitRecord[]>([]);
-  const [selectedDeveloper, setSelectedDeveloper] = React.useState<Developer | null>(null);
-  const [filter, setFilter] = React.useState({ sfh: true, duplex: true, fourplex: true, smallMulti: true });
+  const [types, setTypes] = React.useState<Set<ProductType>>(new Set(PRODUCT_TYPES));
+  const [statuses, setStatuses] = React.useState<Set<DevStatus>>(new Set(STATUSES));
   const [search, setSearch] = React.useState("");
+  const [selected, setSelected] = React.useState<Development | null>(null);
+  const [flyTarget, setFlyTarget] = React.useState<Development | null>(null);
 
-  const [savedPolygons, setSavedPolygons] = React.useState<SavedPolygon[]>([]);
-  const [pendingPolygon, setPendingPolygon] = React.useState<GeoJSON.Polygon | null>(null);
-  const [pendingName, setPendingName] = React.useState("");
-
-  // Initialize the map + draw once.
-  React.useEffect(() => {
-    if (!mapContainer.current || !MAPBOX_TOKEN) return;
-
-    mapboxgl.accessToken = MAPBOX_TOKEN;
-    const map = new mapboxgl.Map({
-      container: mapContainer.current,
-      style: mapStyle,
-      center: DEFAULT_CENTER,
-      zoom: DEFAULT_ZOOM,
-    });
-    map.addControl(new mapboxgl.NavigationControl(), "top-right");
-
-    const draw = new MapboxDraw({
-      displayControlsDefault: false,
-      controls: { polygon: true, trash: true },
-      styles: drawStyles,
-    });
-    map.addControl(draw, "top-left");
-
-    // When a polygon is finished, capture and prompt for a name.
-    const onCreate = (e: { features: GeoJSON.Feature[] }) => {
-      const feature = e.features[0];
-      if (feature?.geometry?.type === "Polygon") {
-        setPendingPolygon(feature.geometry as GeoJSON.Polygon);
-        setPendingName("");
-      }
-    };
-    map.on("draw.create" as never, onCreate);
-
-    mapRef.current = map;
-    drawRef.current = draw;
-
-    return () => {
-      map.off("draw.create" as never, onCreate);
-      map.remove();
-      mapRef.current = null;
-      drawRef.current = null;
-    };
-  }, []);
-
-  // Load permits
-  React.useEffect(() => {
-    permitsProvider
-      .search({ center: { lat: DEFAULT_CENTER[1], lng: DEFAULT_CENTER[0] }, monthsBack: 12, newConstructionOnly: true })
-      .then(setPermits);
-  }, []);
-
-  // Load saved polygons for the signed-in user
-  React.useEffect(() => {
-    const sb = getSupabase();
-    if (!sb || !user) return;
-    sb.from("saved_polygons")
-      .select("id,name,geojson,created_at")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .then(({ data, error }) => {
-        if (error) console.warn(error);
-        else setSavedPolygons((data ?? []) as unknown as SavedPolygon[]);
-      });
-  }, [user]);
-
-  // Drop permit markers
-  React.useEffect(() => {
-    const map = mapRef.current;
-    if (!map || permits.length === 0) return;
-
-    const markers: Marker[] = [];
-    const drop = () => {
-      permits.forEach((p) => {
-        const el = document.createElement("div");
-        el.style.cssText = `
-          width:12px;height:12px;border-radius:50%;
-          background:hsl(38 48% 52%);border:2px solid white;
-          box-shadow:0 1px 4px rgba(0,0,0,.25);cursor:pointer;
-        `;
-        el.title = `${p.contractor ?? "Permit"} · ${p.description}`;
-        const m = new mapboxgl.Marker(el).setLngLat([p.lng, p.lat]).addTo(map);
-        markers.push(m);
-      });
-    };
-    if (map.loaded()) drop();
-    else map.once("load", drop);
-    return () => markers.forEach((m) => m.remove());
-  }, [permits]);
-
-  const developers = React.useMemo<Developer[]>(() => {
-    const byName = new Map<string, Developer>();
-    for (const p of permits) {
-      if (!p.contractor) continue;
-      const ex = byName.get(p.contractor);
-      if (ex) ex.activeProjects += 1;
-      else byName.set(p.contractor, {
-        id: p.contractor, name: p.contractor, activeProjects: 1,
-        productType: p.description.includes("Fourplex") ? "Fourplex" : "SFH",
-        contactUrl: "", lat: p.lat, lng: p.lng,
-      });
-    }
-    return Array.from(byName.values()).sort((a, b) => b.activeProjects - a.activeProjects);
-  }, [permits]);
-
-  const filteredDevs = developers.filter(
-    (d) =>
-      (search === "" || d.name.toLowerCase().includes(search.toLowerCase())) &&
-      ((filter.sfh && d.productType === "SFH") || (filter.fourplex && d.productType === "Fourplex") || d.productType === "Other"),
+  const filtered = React.useMemo(
+    () =>
+      developments.filter(
+        (d) =>
+          types.has(d.productType) &&
+          statuses.has(d.status) &&
+          (search === "" ||
+            `${d.name} ${d.developer} ${d.city} ${d.state}`.toLowerCase().includes(search.toLowerCase())),
+      ),
+    [types, statuses, search],
   );
 
-  const savePolygon = async () => {
-    if (!pendingPolygon) return;
-    const sb = getSupabase();
-    if (!sb || !user) {
-      toast.error("Sign in to save areas.");
-      return;
-    }
-    const name = pendingName.trim() || `Area ${new Date().toLocaleDateString()}`;
-    const { data, error } = await sb
-      .from("saved_polygons")
-      .insert({ user_id: user.id, name, geojson: pendingPolygon as unknown as Record<string, unknown> })
-      .select("id,name,geojson,created_at")
-      .single();
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    setSavedPolygons((prev) => [data as unknown as SavedPolygon, ...prev]);
-    setPendingPolygon(null);
-    toast.success(`Saved "${name}".`);
-  };
+  const stats = summarize(filtered);
 
-  const discardPolygon = () => {
-    setPendingPolygon(null);
-    drawRef.current?.deleteAll();
-  };
+  const toggleType = (t: ProductType) =>
+    setTypes((prev) => {
+      const next = new Set(prev);
+      next.has(t) ? next.delete(t) : next.add(t);
+      return next;
+    });
 
-  const loadPolygon = (p: SavedPolygon) => {
-    const map = mapRef.current;
-    const draw = drawRef.current;
-    if (!map || !draw) return;
-    draw.deleteAll();
-    draw.add({ type: "Feature", properties: { savedId: p.id }, geometry: p.geojson });
-    const bbox = polygonBounds(p.geojson);
-    if (bbox) map.fitBounds(bbox, { padding: 60, duration: 600 });
-    toast.message(`Loaded "${p.name}".`);
-  };
+  const toggleStatus = (s: DevStatus) =>
+    setStatuses((prev) => {
+      const next = new Set(prev);
+      next.has(s) ? next.delete(s) : next.add(s);
+      return next;
+    });
 
-  const deletePolygon = async (p: SavedPolygon) => {
-    const sb = getSupabase();
-    if (!sb) return;
-    const { error } = await sb.from("saved_polygons").delete().eq("id", p.id);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    setSavedPolygons((prev) => prev.filter((s) => s.id !== p.id));
-    toast.success(`Deleted "${p.name}".`);
+  const pick = (d: Development) => {
+    setSelected(d);
+    setFlyTarget(d);
   };
 
   return (
-    <div className="container py-10">
-      <div className="mb-6">
+    <div className="flex flex-col">
+      {/* Title + live stat strip */}
+      <div className="container pt-8 pb-4">
         <div className="gold-rule" />
-        <h1 className="mt-3 font-display text-4xl">Geo Developer Map</h1>
-        <p className="mt-1 text-muted-foreground max-w-xl">
-          Draw a polygon over a neighborhood. Pencil surfaces every active developer
-          in that area from 12–24 months of permits, and remembers every area you save.
-        </p>
-      </div>
-
-      <div className="grid lg:grid-cols-[1fr_360px] gap-6">
-        <Card className="overflow-hidden">
-          <div className="relative h-[640px] w-full bg-secondary">
-            {MAPBOX_TOKEN ? (
-              <div ref={mapContainer} className="absolute inset-0" />
-            ) : (
-              <MapPlaceholder />
-            )}
-            <div className="absolute top-3 right-3 flex gap-2 z-10">
-              <Button size="sm" variant="outline" className="shadow-elevated bg-card">
-                <Layers className="h-4 w-4" /> Layers
-              </Button>
-            </div>
+        <div className="mt-3 flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+          <div>
+            <h1 className="font-display text-4xl">Development Map</h1>
+            <p className="mt-1 text-muted-foreground max-w-xl">
+              A bird’s-eye and insider look at ground-up residential development
+              across the US — what’s being built, how big, and when it was approved.
+            </p>
           </div>
-        </Card>
-
-        <div className="space-y-4">
-          {/* Filters */}
-          <Card>
-            <CardHeader><CardTitle className="text-base">Filters</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="dev-search">Search developers</Label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input id="dev-search" className="pl-9" placeholder="Lariat Homes…" value={search} onChange={(e) => setSearch(e.target.value)} />
-                </div>
-              </div>
-              <div className="space-y-2">
-                {[
-                  ["sfh", "SFH"],
-                  ["duplex", "Duplex"],
-                  ["fourplex", "Fourplex"],
-                  ["smallMulti", "Small multi"],
-                ].map(([k, label]) => (
-                  <label key={k} className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input
-                      type="checkbox" className="accent-gold"
-                      checked={filter[k as keyof typeof filter]}
-                      onChange={(e) => setFilter((p) => ({ ...p, [k]: e.target.checked }))}
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Saved areas */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <PencilIcon className="h-4 w-4 text-gold" /> Saved areas
-              </CardTitle>
-              <CardDescription>
-                {savedPolygons.length === 0
-                  ? "Draw a polygon on the map to save your first area."
-                  : `${savedPolygons.length} saved`}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2 max-h-[260px] overflow-y-auto">
-              {savedPolygons.map((p) => (
-                <div key={p.id} className="flex items-center justify-between gap-2 rounded-md border border-border bg-card p-2.5">
-                  <div className="min-w-0">
-                    <div className="font-medium truncate">{p.name}</div>
-                    <div className="text-xs text-muted-foreground">{p.created_at.slice(0, 10)}</div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button size="icon" variant="ghost" onClick={() => loadPolygon(p)} title="Load on map">
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                    <Button size="icon" variant="ghost" onClick={() => deletePolygon(p)} title="Delete" className="text-destructive">
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          {/* Developers */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Active developers</CardTitle>
-              <CardDescription>{filteredDevs.length} in view · last 12 months</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2 max-h-[420px] overflow-y-auto">
-              {filteredDevs.map((d) => (
-                <button
-                  key={d.id} onClick={() => setSelectedDeveloper(d)}
-                  className="w-full text-left rounded-md border border-border bg-card p-3 hover:bg-secondary/60 transition-colors"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-foreground">{d.name}</span>
-                    <Badge variant="gold">{d.activeProjects}</Badge>
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">{d.productType} specialist</div>
-                </button>
-              ))}
-              {filteredDevs.length === 0 && (
-                <p className="text-sm text-muted-foreground py-6 text-center">
-                  No developers match the current filters.
-                </p>
-              )}
-            </CardContent>
-          </Card>
+          <div className="flex gap-3">
+            <StatChip label="Projects" value={fmtNumber(stats.count)} />
+            <StatChip label="Units" value={fmtNumber(stats.totalUnits)} />
+            <StatChip label="Pipeline value" value={fmtMoney(stats.totalValue)} accent />
+          </div>
         </div>
       </div>
 
-      {selectedDeveloper && (
-        <DeveloperDrawer developer={selectedDeveloper} permits={permits} onClose={() => setSelectedDeveloper(null)} />
-      )}
+      {/* Map + side panel */}
+      <div className="container pb-10">
+        <div className="grid lg:grid-cols-[1fr_380px] gap-4">
+          <Card className="overflow-hidden p-0">
+            <div className="relative h-[640px] w-full">
+              <MapContainer
+                center={US_CENTER}
+                zoom={US_ZOOM}
+                scrollWheelZoom
+                className="h-full w-full"
+                style={{ background: "#eae5db" }}
+              >
+                <TileLayer
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                  url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                />
+                <FlyTo target={flyTarget} />
+                {filtered.map((d) => {
+                  const isSel = selected?.id === d.id;
+                  return (
+                    <CircleMarker
+                      key={d.id}
+                      center={[d.lat, d.lng]}
+                      radius={isSel ? 11 : 7}
+                      pathOptions={{
+                        color: "#ffffff",
+                        weight: 2,
+                        fillColor: TYPE_COLOR[d.productType],
+                        fillOpacity: isSel ? 1 : 0.85,
+                      }}
+                      eventHandlers={{ click: () => setSelected(d) }}
+                    >
+                      <Tooltip direction="top" offset={[0, -6]}>
+                        <span className="text-xs">
+                          <strong>{d.name}</strong> · {d.productType} · {d.units} {d.units === 1 ? "unit" : "units"}
+                        </span>
+                      </Tooltip>
+                    </CircleMarker>
+                  );
+                })}
+              </MapContainer>
 
-      <Dialog open={!!pendingPolygon} onOpenChange={(o) => { if (!o) discardPolygon(); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Save this area</DialogTitle>
-            <DialogDescription>
-              Saved areas appear in the sidebar and can be re-loaded onto the map anytime.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-1.5">
-            <Label htmlFor="area-name">Name</Label>
-            <Input
-              id="area-name" autoFocus placeholder="South Lamar infill, East Austin lots…"
-              value={pendingName} onChange={(e) => setPendingName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") savePolygon(); }}
-            />
+              {/* Legend */}
+              <div className="absolute bottom-3 left-3 z-[1000] rounded-md border border-border bg-card/95 backdrop-blur px-3 py-2 shadow-card">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                  {PRODUCT_TYPES.map((t) => (
+                    <div key={t} className="flex items-center gap-1.5 text-[11px]">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: TYPE_COLOR[t] }} />
+                      <span className="text-foreground/80">{t}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          {/* Side panel: filters + project list */}
+          <div className="space-y-4">
+            <Card>
+              <CardContent className="p-4 space-y-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Search city, developer, project…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <div className="stat-label mb-2">Product type</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PRODUCT_TYPES.map((t) => (
+                      <FilterPill key={t} active={types.has(t)} onClick={() => toggleType(t)} color={TYPE_COLOR[t]}>
+                        {t}
+                      </FilterPill>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="stat-label mb-2">Status</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {STATUSES.map((s) => (
+                      <FilterPill key={s} active={statuses.has(s)} onClick={() => toggleStatus(s)}>
+                        {s}
+                      </FilterPill>
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+              {filtered.map((d) => (
+                <button
+                  key={d.id}
+                  onClick={() => pick(d)}
+                  className={`w-full text-left rounded-md border bg-card p-3 transition-colors hover:bg-secondary/60 ${
+                    selected?.id === d.id ? "border-gold ring-1 ring-gold/40" : "border-border"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium truncate">{d.name}</span>
+                    <span className="h-2.5 w-2.5 rounded-full flex-none" style={{ background: TYPE_COLOR[d.productType] }} />
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    {d.city}, {d.state} · {d.units} {d.units === 1 ? "unit" : "units"} · {fmtMoney(d.estValue)}
+                  </div>
+                </button>
+              ))}
+              {filtered.length === 0 && (
+                <p className="text-sm text-muted-foreground py-8 text-center">
+                  No developments match these filters.
+                </p>
+              )}
+            </div>
           </div>
-          <div className="mt-3 flex items-center justify-end gap-2">
-            <Button variant="ghost" onClick={discardPolygon}>Discard</Button>
-            <Button variant="gold" onClick={savePolygon}>
-              <Save className="h-4 w-4" /> Save area
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </div>
+
+      {selected && <DevelopmentDrawer dev={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }
 
-function DeveloperDrawer({
-  developer, permits, onClose,
-}: { developer: Developer; permits: PermitRecord[]; onClose: () => void }) {
-  const theirs = permits.filter((p) => p.contractor === developer.name);
-  const totalValue = theirs.reduce((s, p) => s + (p.valuation ?? 0), 0);
+function StatChip({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-end" onClick={onClose}>
+    <div className="rounded-md border border-border bg-card px-4 py-2 shadow-card">
+      <div className="stat-label">{label}</div>
+      <div className={`font-display text-xl ${accent ? "text-gold" : "text-foreground"}`}>{value}</div>
+    </div>
+  );
+}
+
+function FilterPill({
+  active, onClick, children, color,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  color?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+        active
+          ? "border-foreground/20 bg-secondary text-foreground"
+          : "border-border bg-background text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {color && <span className="h-2 w-2 rounded-full" style={{ background: active ? color : "transparent", border: `1px solid ${color}` }} />}
+      {children}
+    </button>
+  );
+}
+
+function DevelopmentDrawer({ dev, onClose }: { dev: Development; onClose: () => void }) {
+  const analyzerHref = `/deal-analyzer?arv=${dev.estValue}&costPerSqft=${dev.pricePerSqft}&address=${encodeURIComponent(
+    `${dev.name}, ${dev.city}, ${dev.state}`,
+  )}`;
+
+  return (
+    <div className="fixed inset-0 z-[2000] grid place-items-end" onClick={onClose}>
       <div className="absolute inset-0 bg-foreground/20 backdrop-blur-sm" />
-      <div className="relative h-full w-full sm:w-[420px] bg-card border-l border-border shadow-elevated overflow-y-auto animate-fade-in" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="relative h-full w-full sm:w-[440px] bg-card border-l border-border shadow-elevated overflow-y-auto animate-fade-in"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="p-6">
-          <Badge variant="gold">{developer.activeProjects} active projects</Badge>
-          <h2 className="mt-3 font-display text-2xl">{developer.name}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{developer.productType} specialist · Austin metro</p>
+          <div className="flex items-start justify-between">
+            <Badge variant="gold" className="capitalize">{dev.status}</Badge>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <h2 className="mt-3 font-display text-2xl">{dev.name}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {dev.city}, {dev.state} · by {dev.developer}
+          </p>
+
+          <span
+            className="mt-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-white"
+            style={{ background: TYPE_COLOR[dev.productType] }}
+          >
+            {dev.productType}
+          </span>
+
+          <p className="mt-4 text-sm text-foreground/90 leading-relaxed">{dev.description}</p>
 
           <div className="mt-6 grid grid-cols-2 gap-3">
-            <div className="rounded-md border border-border bg-secondary/40 p-3">
-              <div className="stat-label">Total valuation</div>
-              <div className="font-display text-xl mt-1">{fmtMoney(totalValue)}</div>
-            </div>
-            <div className="rounded-md border border-border bg-secondary/40 p-3">
-              <div className="stat-label">Avg per permit</div>
-              <div className="font-display text-xl mt-1">{fmtMoney(theirs.length ? totalValue / theirs.length : 0)}</div>
-            </div>
+            <Metric icon={Building2} label="Units" value={fmtNumber(dev.units)} />
+            <Metric icon={Layers3} label="Stories" value={fmtNumber(dev.stories)} />
+            <Metric icon={Ruler} label="Land" value={`${fmtNumber(dev.landSqft)} sf`} />
+            <Metric icon={Ruler} label="Building" value={`${fmtNumber(dev.buildingSqft)} sf`} />
+            <Metric icon={CalendarDays} label="Approved" value={dev.approvedDate} />
+            <Metric icon={Building2} label="Est. value" value={fmtMoney(dev.estValue)} accent />
           </div>
 
-          <div className="mt-6">
-            <div className="stat-label mb-3">Recent permits</div>
-            <ul className="space-y-2">
-              {theirs.map((p) => (
-                <li key={p.id} className="rounded-md border border-border p-3 text-sm">
-                  <div className="font-medium">{p.address}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">{p.description} · {p.issuedDate}</div>
-                </li>
-              ))}
-            </ul>
+          <div className="mt-6 rounded-md border border-border bg-secondary/40 p-4">
+            <div className="stat-label">Build cost assumption</div>
+            <div className="font-display text-xl mt-1">{fmtMoney(dev.pricePerSqft)}/sf</div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Used to pre-fill the Deal Analyzer for this project.
+            </p>
           </div>
 
           <div className="mt-6 flex gap-2">
-            <Button variant="gold" className="flex-1">Send outreach email</Button>
+            <Button variant="gold" className="flex-1" asChild>
+              <Link to={analyzerHref}>
+                Underwrite this deal <ArrowRight className="h-4 w-4" />
+              </Link>
+            </Button>
             <Button variant="outline" onClick={onClose}>Close</Button>
           </div>
         </div>
@@ -407,64 +307,20 @@ function DeveloperDrawer({
   );
 }
 
-function MapPlaceholder() {
+function Metric({
+  icon: Icon, label, value, accent,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  accent?: boolean;
+}) {
   return (
-    <div className="absolute inset-0 grid place-items-center bg-gradient-to-br from-secondary/60 to-card">
-      <div className="text-center max-w-md px-6">
-        <MapPin className="h-10 w-10 mx-auto text-gold" />
-        <h3 className="mt-3 font-display text-2xl">Map preview</h3>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Set <code className="px-1.5 py-0.5 rounded bg-secondary">VITE_MAPBOX_TOKEN</code>{" "}
-          to load the live Geo Developer Map with polygon drawing. The developer list
-          still works without it using the local demo permit set.
-        </p>
+    <div className="rounded-md border border-border bg-card p-3">
+      <div className="flex items-center gap-1.5 stat-label">
+        <Icon className="h-3.5 w-3.5" /> {label}
       </div>
+      <div className={`font-display text-lg mt-1 ${accent ? "text-gold" : "text-foreground"}`}>{value}</div>
     </div>
   );
 }
-
-function polygonBounds(poly: GeoJSON.Polygon): [[number, number], [number, number]] | null {
-  const coords = poly.coordinates?.[0];
-  if (!coords || coords.length === 0) return null;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const [x, y] of coords) {
-    if (x < minX) minX = x;
-    if (y < minY) minY = y;
-    if (x > maxX) maxX = x;
-    if (y > maxY) maxY = y;
-  }
-  return [[minX, minY], [maxX, maxY]];
-}
-
-/** Gold-tinted draw styles so the polygon matches the design system. */
-const drawStyles: object[] = [
-  // Polygon fill
-  {
-    id: "gl-draw-polygon-fill",
-    type: "fill",
-    filter: ["all", ["==", "$type", "Polygon"], ["!=", "mode", "static"]],
-    paint: { "fill-color": "hsl(38, 48%, 52%)", "fill-outline-color": "hsl(38, 48%, 42%)", "fill-opacity": 0.18 },
-  },
-  // Polygon outline (active + inactive)
-  {
-    id: "gl-draw-polygon-stroke",
-    type: "line",
-    filter: ["all", ["==", "$type", "Polygon"]],
-    layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": "hsl(38, 48%, 42%)", "line-width": 2 },
-  },
-  // Vertices
-  {
-    id: "gl-draw-polygon-and-line-vertex-stroke-inactive",
-    type: "circle",
-    filter: ["all", ["==", "meta", "vertex"], ["==", "$type", "Point"]],
-    paint: { "circle-radius": 5, "circle-color": "#fff", "circle-stroke-color": "hsl(38, 48%, 42%)", "circle-stroke-width": 2 },
-  },
-  // Midpoints
-  {
-    id: "gl-draw-polygon-midpoint",
-    type: "circle",
-    filter: ["all", ["==", "$type", "Point"], ["==", "meta", "midpoint"]],
-    paint: { "circle-radius": 3, "circle-color": "hsl(38, 48%, 52%)" },
-  },
-];

@@ -90,10 +90,10 @@ function NotConfigured() {
         </CardHeader>
         <CardContent className="space-y-2">
           <Button variant="gold" className="w-full" asChild>
-            <Link to="/deal-analyzer">Try the Deal Analyzer →</Link>
+            <Link to="/map">Open the development map →</Link>
           </Button>
           <Button variant="outline" className="w-full" asChild>
-            <Link to="/admin">Explore the admin view (demo)</Link>
+            <Link to="/deal-analyzer">Try the Deal Analyzer</Link>
           </Button>
         </CardContent>
       </Card>
