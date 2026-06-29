@@ -15,22 +15,23 @@ export function RequireAuth({ children, requireRole = "free" }: Props) {
   const { user, role, loading, configured } = useAuth();
   const location = useLocation();
 
+  // Keyless preview (no Supabase configured): open every gated module in
+  // demo mode so the whole app can be explored end-to-end without a backend.
+  // Real auth + role gating below take over the instant VITE_SUPABASE_URL and
+  // VITE_SUPABASE_ANON_KEY are set.
   if (!configured) {
     return (
-      <div className="container py-16 max-w-xl">
-        <h2 className="font-display text-3xl">Connect Supabase to continue</h2>
-        <p className="mt-3 text-muted-foreground">
-          This page requires authentication and data storage. Set{" "}
-          <code className="px-1.5 py-0.5 rounded bg-secondary text-foreground">
-            VITE_SUPABASE_URL
-          </code>{" "}
-          and{" "}
-          <code className="px-1.5 py-0.5 rounded bg-secondary text-foreground">
-            VITE_SUPABASE_ANON_KEY
-          </code>{" "}
-          in your environment, then reload.
-        </p>
-      </div>
+      <>
+        <div className="bg-gold-muted/60 border-b border-gold/30">
+          <div className="container py-2 text-xs text-foreground/80 flex flex-wrap items-center gap-x-2">
+            <span className="font-medium">Demo mode</span>
+            <span className="text-muted-foreground">
+              — exploring on sample data. Connect Supabase to enable accounts, saving, and real role gating.
+            </span>
+          </div>
+        </div>
+        {children}
+      </>
     );
   }
 

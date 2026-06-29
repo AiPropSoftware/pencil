@@ -80,11 +80,22 @@ function NotConfigured() {
     <div className="container py-20 max-w-md">
       <Card>
         <CardHeader>
-          <CardTitle>Connect Supabase</CardTitle>
+          <div className="gold-rule" />
+          <CardTitle className="mt-3">Accounts aren’t live yet</CardTitle>
           <CardDescription>
-            Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable sign-in.
+            Sign-in needs a backend. Add VITE_SUPABASE_URL and
+            VITE_SUPABASE_ANON_KEY in Vercel to enable real accounts. Until
+            then, the whole app is explorable in demo mode.
           </CardDescription>
         </CardHeader>
+        <CardContent className="space-y-2">
+          <Button variant="gold" className="w-full" asChild>
+            <Link to="/deal-analyzer">Try the Deal Analyzer →</Link>
+          </Button>
+          <Button variant="outline" className="w-full" asChild>
+            <Link to="/admin">Explore the admin view (demo)</Link>
+          </Button>
+        </CardContent>
       </Card>
     </div>
   );

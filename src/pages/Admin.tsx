@@ -21,6 +21,15 @@ interface ProfileWithRole {
 
 const ROLES: Role[] = ["admin", "pro", "free"];
 
+// Shown when Supabase isn't configured so the admin view is explorable in demo mode.
+const DEMO_USERS: ProfileWithRole[] = [
+  { id: "demo-1", email: "you@pencil.app", full_name: "You (demo admin)", created_at: "2026-06-01", role: "admin" },
+  { id: "demo-2", email: "dana.builds@example.com", full_name: "Dana Okafor", created_at: "2026-06-08", role: "pro" },
+  { id: "demo-3", email: "marcus.invests@example.com", full_name: "Marcus Lee", created_at: "2026-06-14", role: "pro" },
+  { id: "demo-4", email: "trial.user@example.com", full_name: "Priya Nair", created_at: "2026-06-22", role: "free" },
+  { id: "demo-5", email: "newlead@example.com", full_name: "Sam Carter", created_at: "2026-06-27", role: "free" },
+];
+
 export default function Admin() {
   const { user } = useAuth();
   const [users, setUsers] = React.useState<ProfileWithRole[]>([]);
@@ -31,6 +40,8 @@ export default function Admin() {
   const load = React.useCallback(async () => {
     const sb = getSupabase();
     if (!sb) {
+      // Demo mode — no backend. Show sample users so the view is explorable.
+      setUsers(DEMO_USERS);
       setLoading(false);
       return;
     }
@@ -48,7 +59,12 @@ export default function Admin() {
 
   const changeRole = async (target: ProfileWithRole, role: Role) => {
     const sb = getSupabase();
-    if (!sb) return;
+    if (!sb) {
+      // Demo mode — update locally only.
+      setUsers((prev) => prev.map((u) => (u.id === target.id ? { ...u, role } : u)));
+      toast.success(`${target.email} is now ${role}. (demo — not persisted)`);
+      return;
+    }
     setSavingId(target.id);
     const { error } = await sb.rpc("set_user_role", { _target: target.id, _role: role });
     setSavingId(null);
