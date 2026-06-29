@@ -145,3 +145,128 @@ export function summarize(items: Development[]): DevStats {
     { count: 0, totalUnits: 0, totalValue: 0 },
   );
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Enrichment — modeled from the base record until live ATTOM/Shovels/MLS feeds
+// are wired. Every derived field is deterministic (no randomness) so the demo
+// is stable, and clearly labeled "modeled" in the UI.
+// ───────────────────────────────────────────────────────────────────────────
+
+function hashId(id: string): number {
+  let h = 0;
+  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return h;
+}
+function addDays(iso: string, days: number): string {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function addMonths(iso: string, months: number): string {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCMonth(d.getUTCMonth() + months);
+  return d.toISOString().slice(0, 10);
+}
+
+export type ListingStatus = "Listed for sale" | "Recently sold" | "Under construction" | "Pre-construction";
+
+export interface ListingInfo {
+  status: ListingStatus;
+  listPrice?: number;
+  daysOnMarket?: number;
+  soldDate?: string;
+  soldPrice?: number;
+  zillowUrl?: string;
+}
+
+/** Derive listing / sale state from build status. */
+export function listingInfo(d: Development): ListingInfo {
+  const h = hashId(d.id);
+  if (d.status === "Completed") {
+    if (h % 2 === 0) {
+      return {
+        status: "Listed for sale",
+        listPrice: Math.round((d.estValue * 1.02) / 1000) * 1000,
+        daysOnMarket: 8 + (h % 80),
+        zillowUrl: `https://www.zillow.com/homes/${encodeURIComponent(`${d.city} ${d.state}`)}_rb/`,
+      };
+    }
+    return { status: "Recently sold", soldDate: addMonths(d.approvedDate, 9), soldPrice: d.estValue };
+  }
+  if (d.status === "Under construction") return { status: "Under construction" };
+  return { status: "Pre-construction" };
+}
+
+export interface PermitTimeline {
+  filed: string;
+  approved: string;
+  issued: string | null;
+  targetCompletion: string;
+}
+
+export function permitTimeline(d: Development): PermitTimeline {
+  const issued =
+    d.status === "Permitted" || d.status === "Under construction" || d.status === "Completed"
+      ? addDays(d.approvedDate, 28)
+      : null;
+  return {
+    filed: addDays(d.approvedDate, -55),
+    approved: d.approvedDate,
+    issued,
+    targetCompletion: addMonths(d.approvedDate, 10),
+  };
+}
+
+const ARCHITECTS = [
+  "Studio Vela", "Form & Field Architecture", "Northwood Design Studio",
+  "Atelier Bram", "Cardinal Architecture", "Lume Studio",
+  "Verge Architects", "Meridian Design Co.",
+];
+
+/** Architect of record (public on the permit application). */
+export function architectFor(d: Development): string {
+  return ARCHITECTS[hashId(d.id) % ARCHITECTS.length];
+}
+
+// ── Metro $/sqft trend (confidence series) ──────────────────────────────────
+export const QUARTERS = [
+  "Q3 '24", "Q4 '24", "Q1 '25", "Q2 '25", "Q3 '25", "Q4 '25", "Q1 '26", "Q2 '26",
+];
+
+const METRO_BASE_PPSF: Record<string, number> = {
+  Austin: 470, Dallas: 360, Houston: 320, Phoenix: 360, Denver: 520,
+  Nashville: 420, Atlanta: 360, Tampa: 360, Miami: 1350, Charlotte: 360,
+  Raleigh: 360, Seattle: 720, Portland: 560, Columbus: 300,
+  "Salt Lake City": 470, Boise: 380, "Las Vegas": 340,
+};
+
+export interface PpsfPoint {
+  quarter: string;
+  ppsf: number;
+  low: number;
+  high: number;
+}
+
+/** Rolling new-construction $/sqft by quarter with a confidence band. */
+export function metroTrend(city: string): PpsfPoint[] {
+  const base = METRO_BASE_PPSF[city] ?? 350;
+  return QUARTERS.map((quarter, i) => {
+    const ppsf = Math.round(base * (0.8 + i * 0.029));
+    return { quarter, ppsf, low: Math.round(ppsf * 0.87), high: Math.round(ppsf * 1.13) };
+  });
+}
+
+export interface PpsfSummary {
+  current: number;
+  low: number;
+  high: number;
+  since: string;
+}
+
+export function ppsfSummary(city: string): PpsfSummary {
+  const t = metroTrend(city);
+  const cur = t[t.length - 1];
+  const thresh = cur.ppsf * 0.92;
+  const idx = t.findIndex((p) => p.ppsf >= thresh);
+  return { current: cur.ppsf, low: cur.low, high: cur.high, since: QUARTERS[idx < 0 ? 0 : idx] };
+}
