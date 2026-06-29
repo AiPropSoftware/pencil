@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Warm off-white paper background */
+    --background: 36 33% 97%;
+    --foreground: 25 22% 12%;
+
+    --card: 36 40% 99%;
+    --card-foreground: 25 22% 12%;
+
+    --popover: 36 40% 99%;
+    --popover-foreground: 25 22% 12%;
+
+    /* Charcoal primary */
+    --primary: 25 22% 12%;
+    --primary-foreground: 36 33% 97%;
+
+    --secondary: 34 18% 92%;
+    --secondary-foreground: 25 22% 18%;
+
+    --muted: 34 18% 94%;
+    --muted-foreground: 25 10% 40%;
+
+    --accent: 36 35% 90%;
+    --accent-foreground: 25 22% 14%;
+
+    --destructive: 0 60% 45%;
+    --destructive-foreground: 36 33% 97%;
+
+    --border: 30 15% 86%;
+    --input: 30 15% 86%;
+    --ring: 38 40% 50%;
+
+    /* Restrained gold accent */
+    --gold: 38 48% 52%;
+    --gold-foreground: 25 22% 12%;
+    --gold-muted: 38 45% 88%;
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 25 15% 10%;
+    --foreground: 36 33% 95%;
+    --card: 25 15% 12%;
+    --card-foreground: 36 33% 95%;
+    --popover: 25 15% 12%;
+    --popover-foreground: 36 33% 95%;
+    --primary: 36 33% 95%;
+    --primary-foreground: 25 22% 12%;
+    --secondary: 25 10% 18%;
+    --secondary-foreground: 36 33% 95%;
+    --muted: 25 10% 16%;
+    --muted-foreground: 30 8% 65%;
+    --accent: 25 10% 20%;
+    --accent-foreground: 36 33% 95%;
+    --destructive: 0 50% 40%;
+    --destructive-foreground: 36 33% 95%;
+    --border: 25 10% 22%;
+    --input: 25 10% 22%;
+    --ring: 38 40% 60%;
+    --gold: 38 48% 58%;
+    --gold-foreground: 25 22% 12%;
+    --gold-muted: 38 25% 25%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  h1, h2, h3, h4 {
+    @apply font-display tracking-tight;
+  }
+  /* Subtle paper grain */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.4;
+    background-image:
+      radial-gradient(hsl(var(--foreground) / 0.025) 1px, transparent 1px);
+    background-size: 22px 22px;
+    mix-blend-mode: multiply;
+  }
+  #root {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .container-narrow {
+    @apply mx-auto w-full max-w-5xl px-6;
+  }
+  .section-divider {
+    @apply h-px w-full bg-gradient-to-r from-transparent via-border to-transparent;
+  }
+  .gold-rule {
+    @apply h-px w-12 bg-gold;
+  }
+  .stat-label {
+    @apply text-xs uppercase tracking-[0.14em] text-muted-foreground font-medium;
+  }
+  .stat-value {
+    @apply font-display text-2xl text-foreground;
+  }
+}
