@@ -28,6 +28,9 @@ const US_CENTER: [number, number] = [39.5, -98.35];
 const US_ZOOM = 4.4;
 const PAGE = 12; // initial pins; "Show 20 more" grows this
 
+// Optional — embeds an interactive Street View panorama in the drawer when set.
+const GOOGLE_MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY as string | undefined;
+
 /** Fit the map to the searched area; fly to a single result. */
 function FitOnPlace({ place, points }: { place: string; points: Development[] }) {
   const map = useMap();
@@ -405,6 +408,8 @@ function DevelopmentDrawer({ dev, onClose }: { dev: Development; onClose: () => 
           <span className="mt-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-white" style={{ background: TYPE_COLOR[dev.productType] }}>{dev.productType}</span>
           <p className="mt-4 text-sm text-foreground/90 leading-relaxed">{dev.description}</p>
 
+          <StreetWalk lat={dev.lat} lng={dev.lng} />
+
           {/* Key metrics */}
           <div className="mt-6 grid grid-cols-2 gap-3">
             <Metric icon={Building2} label="Units" value={fmtNumber(dev.units)} />
@@ -524,6 +529,43 @@ function DevelopmentDrawer({ dev, onClose }: { dev: Development; onClose: () => 
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function StreetWalk({ lat, lng }: { lat: number; lng: number }) {
+  // Zero-key: opens Google Maps Street View at these coordinates in a new tab.
+  const panoUrl = `https://www.google.com/maps?q&layer=c&cbll=${lat},${lng}`;
+  return (
+    <div className="mt-6">
+      <div className="flex items-center justify-between mb-2">
+        <div className="stat-label">Street view</div>
+        <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">walk the block</span>
+      </div>
+      {GOOGLE_MAPS_KEY ? (
+        <>
+          <iframe
+            title="Street View"
+            className="w-full h-56 rounded-md border border-border"
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+            allowFullScreen
+            src={`https://www.google.com/maps/embed/v1/streetview?key=${GOOGLE_MAPS_KEY}&location=${lat},${lng}&heading=210&pitch=10&fov=80`}
+          />
+          <a href={panoUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-gold hover:underline">
+            Open full Street View <ExternalLink className="h-3 w-3" />
+          </a>
+        </>
+      ) : (
+        <a
+          href={panoUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center justify-center gap-2 rounded-md border border-border bg-secondary/40 py-3 text-sm font-medium text-foreground hover:bg-secondary transition-colors"
+        >
+          Walk this street in Google Maps <ExternalLink className="h-4 w-4" />
+        </a>
+      )}
     </div>
   );
 }
