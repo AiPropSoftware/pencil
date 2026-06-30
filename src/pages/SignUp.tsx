@@ -45,18 +45,25 @@ export default function SignUp() {
     e.preventDefault();
     const sb = getSupabase()!;
     setLoading(true);
-    const { error } = await sb.auth.signUp({
+    const { data, error } = await sb.auth.signUp({
       email,
       password,
       options: {
         data: { full_name: fullName },
-        emailRedirectTo: `${window.location.origin}/deal-analyzer`,
+        emailRedirectTo: `${window.location.origin}/map`,
       },
     });
     setLoading(false);
     if (error) return toast.error(error.message);
-    toast.success("Check your inbox to confirm your email.");
-    navigate("/sign-in");
+    if (data.session) {
+      // Email confirmation is off — the user is signed in immediately.
+      toast.success("Account created. Welcome to Pencil.");
+      navigate("/map");
+    } else {
+      // Confirmation required — Supabase emailed a verification link.
+      toast.success("Account created — confirm your email, then sign in.");
+      navigate("/sign-in");
+    }
   };
 
   const handleGoogle = async () => {
