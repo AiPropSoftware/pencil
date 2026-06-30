@@ -37,20 +37,37 @@ export default function DealAnalyzer() {
     return defaultDeal;
   });
 
+  // Build-to-sell (single family / for-sale) vs build-to-rent (refi + hold).
+  // Sell mode hides the Refi and Rental steps — they don't apply to a flip.
+  const [strategy, setStrategy] = React.useState<"sell" | "rent">("rent");
+
   React.useEffect(() => {
     localStorage.setItem(LS_KEY, JSON.stringify(inputs));
   }, [inputs]);
 
-  // Allow Comps Engine to pre-fill ARV / cost-per-sqft via querystring.
+  // Pre-fill from the Map ("Underwrite this deal") or Comps via querystring.
   React.useEffect(() => {
     const arv = Number(params.get("arv"));
     const costPerSqft = Number(params.get("costPerSqft"));
+    const totalSqft = Number(params.get("totalSqft"));
     const address = params.get("address") ?? undefined;
+    const productType = params.get("productType");
     if (Number.isFinite(arv) && arv > 0) setInputs((p) => ({ ...p, arv }));
     if (Number.isFinite(costPerSqft) && costPerSqft > 0) setInputs((p) => ({ ...p, costPerSqft }));
+    if (Number.isFinite(totalSqft) && totalSqft > 0) setInputs((p) => ({ ...p, totalSqft }));
     if (address) setInputs((p) => ({ ...p, address }));
+    // Single-family → build-to-sell (no refi/rental).
+    if (productType === "SFH") {
+      setStrategy("sell");
+      setInputs((p) => ({ ...p, refiEnabled: false }));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const chooseStrategy = (s: "sell" | "rent") => {
+    setStrategy(s);
+    setInputs((p) => ({ ...p, refiEnabled: s === "rent" }));
+  };
 
   const r = React.useMemo(() => calcDeal(inputs), [inputs]);
   const set = <K extends keyof DealInputs>(k: K, v: DealInputs[K]) =>
@@ -113,12 +130,31 @@ export default function DealAnalyzer() {
             <CardDescription>Step through each section. Results update live.</CardDescription>
           </CardHeader>
           <CardContent>
+            {/* Strategy: build-to-sell hides Refi + Rental (a flip has neither). */}
+            <div className="mb-5 flex items-center gap-2 rounded-md border border-border bg-secondary/40 p-1">
+              <button
+                onClick={() => chooseStrategy("sell")}
+                className={`flex-1 rounded-sm px-3 py-1.5 text-sm font-medium transition-colors ${
+                  strategy === "sell" ? "bg-card text-foreground shadow-card" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Build to sell
+              </button>
+              <button
+                onClick={() => chooseStrategy("rent")}
+                className={`flex-1 rounded-sm px-3 py-1.5 text-sm font-medium transition-colors ${
+                  strategy === "rent" ? "bg-card text-foreground shadow-card" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Build to rent (refi)
+              </button>
+            </div>
             <Tabs defaultValue="step1">
-              <TabsList className="grid grid-cols-4 w-full">
-                <TabsTrigger value="step1">1 · Costs</TabsTrigger>
-                <TabsTrigger value="step2">2 · Refi</TabsTrigger>
-                <TabsTrigger value="step3">3 · Partner</TabsTrigger>
-                <TabsTrigger value="step4">4 · Rental</TabsTrigger>
+              <TabsList className={`grid w-full ${strategy === "rent" ? "grid-cols-4" : "grid-cols-2"}`}>
+                <TabsTrigger value="step1">Costs</TabsTrigger>
+                {strategy === "rent" && <TabsTrigger value="step2">Refi</TabsTrigger>}
+                <TabsTrigger value="step3">Partner</TabsTrigger>
+                {strategy === "rent" && <TabsTrigger value="step4">Rental</TabsTrigger>}
               </TabsList>
 
               <TabsContent value="step1" className="space-y-5">
@@ -144,16 +180,18 @@ export default function DealAnalyzer() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="step2" className="space-y-5">
-                <ToggleRow label="Refi after build" checked={inputs.refiEnabled} onChange={(v) => set("refiEnabled", v)} />
-                <div className={`grid sm:grid-cols-2 gap-4 ${inputs.refiEnabled ? "" : "opacity-50 pointer-events-none"}`}>
-                  <NumericField label="Takeout LTV" value={inputs.refiLtvPct} onChange={(v) => set("refiLtvPct", v)} suffix="%" percent />
-                  <NumericField label="Refi closing" value={inputs.refiClosingPct} onChange={(v) => set("refiClosingPct", v)} suffix="%" percent />
-                  <NumericField label="Refi rate" value={inputs.refiRate} onChange={(v) => set("refiRate", v)} suffix="%" percent />
-                  <NumericField label="Loan term" value={inputs.refiTermYears} onChange={(v) => set("refiTermYears", v)} suffix="yr" />
-                  <NumericField label="Amortization" value={inputs.amortYears} onChange={(v) => set("amortYears", v)} suffix="yr" className="sm:col-span-2" />
-                </div>
-              </TabsContent>
+              {strategy === "rent" && (
+                <TabsContent value="step2" className="space-y-5">
+                  <ToggleRow label="Refi after build" checked={inputs.refiEnabled} onChange={(v) => set("refiEnabled", v)} />
+                  <div className={`grid sm:grid-cols-2 gap-4 ${inputs.refiEnabled ? "" : "opacity-50 pointer-events-none"}`}>
+                    <NumericField label="Takeout LTV" value={inputs.refiLtvPct} onChange={(v) => set("refiLtvPct", v)} suffix="%" percent />
+                    <NumericField label="Refi closing" value={inputs.refiClosingPct} onChange={(v) => set("refiClosingPct", v)} suffix="%" percent />
+                    <NumericField label="Refi rate" value={inputs.refiRate} onChange={(v) => set("refiRate", v)} suffix="%" percent />
+                    <NumericField label="Loan term" value={inputs.refiTermYears} onChange={(v) => set("refiTermYears", v)} suffix="yr" />
+                    <NumericField label="Amortization" value={inputs.amortYears} onChange={(v) => set("amortYears", v)} suffix="yr" className="sm:col-span-2" />
+                  </div>
+                </TabsContent>
+              )}
 
               <TabsContent value="step3" className="space-y-5">
                 <ToggleRow label="Capital partner" checked={inputs.partnerEnabled} onChange={(v) => set("partnerEnabled", v)} />
@@ -169,23 +207,25 @@ export default function DealAnalyzer() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="step4" className="space-y-5">
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <NumericField label="Monthly rent" value={inputs.monthlyRent} onChange={(v) => set("monthlyRent", v)} prefix="$" />
-                  <NumericField label="Vacancy" value={inputs.vacancyPct} onChange={(v) => set("vacancyPct", v)} suffix="%" percent />
-                  <NumericField label="Taxes / mo" value={inputs.taxesMo} onChange={(v) => set("taxesMo", v)} prefix="$" />
-                  <NumericField label="Insurance / mo" value={inputs.insuranceMo} onChange={(v) => set("insuranceMo", v)} prefix="$" />
-                  <NumericField label="Maintenance / mo" value={inputs.maintenanceMo} onChange={(v) => set("maintenanceMo", v)} prefix="$" />
-                  <NumericField label="Management" value={inputs.managementPct} onChange={(v) => set("managementPct", v)} suffix="%" percent />
-                  <NumericField label="Other / mo" value={inputs.otherMo} onChange={(v) => set("otherMo", v)} prefix="$" />
-                </div>
-              </TabsContent>
+              {strategy === "rent" && (
+                <TabsContent value="step4" className="space-y-5">
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <NumericField label="Monthly rent" value={inputs.monthlyRent} onChange={(v) => set("monthlyRent", v)} prefix="$" />
+                    <NumericField label="Vacancy" value={inputs.vacancyPct} onChange={(v) => set("vacancyPct", v)} suffix="%" percent />
+                    <NumericField label="Taxes / mo" value={inputs.taxesMo} onChange={(v) => set("taxesMo", v)} prefix="$" />
+                    <NumericField label="Insurance / mo" value={inputs.insuranceMo} onChange={(v) => set("insuranceMo", v)} prefix="$" />
+                    <NumericField label="Maintenance / mo" value={inputs.maintenanceMo} onChange={(v) => set("maintenanceMo", v)} prefix="$" />
+                    <NumericField label="Management" value={inputs.managementPct} onChange={(v) => set("managementPct", v)} suffix="%" percent />
+                    <NumericField label="Other / mo" value={inputs.otherMo} onChange={(v) => set("otherMo", v)} prefix="$" />
+                  </div>
+                </TabsContent>
+              )}
             </Tabs>
           </CardContent>
         </Card>
 
         {/* Results */}
-        <Results inputs={inputs} r={r} />
+        <Results inputs={inputs} r={r} strategy={strategy} />
       </div>
     </div>
   );
@@ -202,7 +242,8 @@ function ToggleRow({
   );
 }
 
-function Results({ inputs, r }: { inputs: DealInputs; r: DealResults }) {
+function Results({ inputs, r, strategy }: { inputs: DealInputs; r: DealResults; strategy: "sell" | "rent" }) {
+  const showRent = strategy === "rent";
   return (
     <div className="space-y-5 lg:sticky lg:top-20 self-start">
       {/* Hero stats */}
@@ -239,8 +280,22 @@ function Results({ inputs, r }: { inputs: DealInputs; r: DealResults }) {
         </CardContent>
       </Card>
 
+      {/* Sale summary (build-to-sell) */}
+      {!showRent && (
+        <Card>
+          <CardHeader><CardTitle className="text-lg">On sale</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            <Row label="Sale price (ARV)" value={fmtMoney(inputs.arv)} />
+            <Row label="All-in cost" value={fmtMoney(r.allInCost)} />
+            <Row label="Projected profit" value={fmtMoney(r.projectedProfit)} accent />
+            <Row label="Profit margin" value={fmtPct(r.profitMargin)} />
+            <Row label="Return on cash" value={fmtPct(r.cashRequired > 0 ? r.projectedProfit / r.cashRequired : 0)} accent />
+          </CardContent>
+        </Card>
+      )}
+
       {/* Refi block */}
-      {inputs.refiEnabled && (
+      {showRent && inputs.refiEnabled && (
         <Card>
           <CardHeader><CardTitle className="text-lg">Refinance</CardTitle></CardHeader>
           <CardContent className="space-y-2">
@@ -256,22 +311,24 @@ function Results({ inputs, r }: { inputs: DealInputs; r: DealResults }) {
       )}
 
       {/* Rental block */}
-      <Card>
-        <CardHeader><CardTitle className="text-lg">Rental operating</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          <Row label="Gross rent (annual)" value={fmtMoney(r.grossRent)} />
-          <Row label="Vacancy loss" value={fmtMoney(-r.vacancyLoss)} />
-          <Row label="EGI" value={fmtMoney(r.egi)} />
-          <Row label="Opex" value={fmtMoney(-r.opex)} />
-          <Row label="NOI" value={fmtMoney(r.noi)} accent />
-          {inputs.refiEnabled && <Row label="Debt service" value={fmtMoney(-r.debtService)} />}
-          {inputs.refiEnabled && <Row label="Annual cash flow" value={fmtMoney(r.cashFlow)} accent />}
-          <Separator className="my-2" />
-          <Row label="Cap rate" value={fmtPct(r.capRate)} />
-          {inputs.refiEnabled && <Row label="Cash-on-cash" value={fmtPct(r.cashOnCash)} />}
-          {inputs.refiEnabled && <Row label="DSCR" value={fmtRatio(r.dscr)} />}
-        </CardContent>
-      </Card>
+      {showRent && (
+        <Card>
+          <CardHeader><CardTitle className="text-lg">Rental operating</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            <Row label="Gross rent (annual)" value={fmtMoney(r.grossRent)} />
+            <Row label="Vacancy loss" value={fmtMoney(-r.vacancyLoss)} />
+            <Row label="EGI" value={fmtMoney(r.egi)} />
+            <Row label="Opex" value={fmtMoney(-r.opex)} />
+            <Row label="NOI" value={fmtMoney(r.noi)} accent />
+            {inputs.refiEnabled && <Row label="Debt service" value={fmtMoney(-r.debtService)} />}
+            {inputs.refiEnabled && <Row label="Annual cash flow" value={fmtMoney(r.cashFlow)} accent />}
+            <Separator className="my-2" />
+            <Row label="Cap rate" value={fmtPct(r.capRate)} />
+            {inputs.refiEnabled && <Row label="Cash-on-cash" value={fmtPct(r.cashOnCash)} />}
+            {inputs.refiEnabled && <Row label="DSCR" value={fmtRatio(r.dscr)} />}
+          </CardContent>
+        </Card>
+      )}
 
       {inputs.partnerEnabled && (
         <Card>

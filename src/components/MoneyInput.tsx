@@ -40,7 +40,11 @@ export function NumericField({
   const toDisplay = (n: number) => {
     if (!Number.isFinite(n)) return "";
     const v = percent ? n * 100 : n;
-    return displayWithCommas(v.toFixed(displayDecimals).replace(/\.?0+$/, ""));
+    let s = v.toFixed(displayDecimals);
+    // Trim trailing zeros only in the fractional part (e.g. "7.50" -> "7.5"),
+    // never from whole numbers ("250000" must NOT become "25").
+    if (s.includes(".")) s = s.replace(/0+$/, "").replace(/\.$/, "");
+    return displayWithCommas(s);
   };
   const [text, setText] = React.useState<string>(toDisplay(value));
   const [focused, setFocused] = React.useState(false);

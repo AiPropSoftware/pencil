@@ -372,7 +372,7 @@ function DevelopmentDrawer({ dev, onClose }: { dev: Development; onClose: () => 
     .filter((d) => d.city === dev.city && d.id !== dev.id)
     .slice(0, 4)
     .map((d) => ({ id: d.id, name: d.name, ppsf: Math.round(d.estValue / d.buildingSqft) }));
-  const analyzerHref = `/deal-analyzer?arv=${dev.estValue}&costPerSqft=${dev.pricePerSqft}&address=${encodeURIComponent(
+  const analyzerHref = `/deal-analyzer?arv=${dev.estValue}&costPerSqft=${dev.pricePerSqft}&totalSqft=${dev.buildingSqft}&productType=${encodeURIComponent(dev.productType)}&address=${encodeURIComponent(
     `${dev.name}, ${dev.city}, ${dev.state}`,
   )}`;
 
