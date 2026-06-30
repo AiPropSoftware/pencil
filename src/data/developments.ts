@@ -51,7 +51,34 @@ export const TYPE_COLOR: Record<ProductType, string> = {
   Infill: "#5b6b73",       // slate
 };
 
-export const developments: Development[] = [
+export interface MetroCenter {
+  lat: number;
+  lng: number;
+  state: string;
+  ppsf: number; // headline new-construction $/sqft for the metro
+}
+
+export const METRO_CENTERS: Record<string, MetroCenter> = {
+  Austin: { lat: 30.27, lng: -97.74, state: "TX", ppsf: 470 },
+  Dallas: { lat: 32.78, lng: -96.80, state: "TX", ppsf: 360 },
+  Houston: { lat: 29.76, lng: -95.37, state: "TX", ppsf: 320 },
+  Phoenix: { lat: 33.45, lng: -112.07, state: "AZ", ppsf: 360 },
+  Denver: { lat: 39.74, lng: -104.99, state: "CO", ppsf: 520 },
+  Nashville: { lat: 36.16, lng: -86.78, state: "TN", ppsf: 420 },
+  Atlanta: { lat: 33.75, lng: -84.39, state: "GA", ppsf: 360 },
+  Tampa: { lat: 27.95, lng: -82.46, state: "FL", ppsf: 360 },
+  Miami: { lat: 25.76, lng: -80.19, state: "FL", ppsf: 1350 },
+  Charlotte: { lat: 35.23, lng: -80.84, state: "NC", ppsf: 360 },
+  Raleigh: { lat: 35.78, lng: -78.64, state: "NC", ppsf: 360 },
+  Seattle: { lat: 47.61, lng: -122.33, state: "WA", ppsf: 720 },
+  Portland: { lat: 45.51, lng: -122.68, state: "OR", ppsf: 560 },
+  Columbus: { lat: 39.96, lng: -82.99, state: "OH", ppsf: 300 },
+  "Salt Lake City": { lat: 40.76, lng: -111.89, state: "UT", ppsf: 470 },
+  Boise: { lat: 43.62, lng: -116.20, state: "ID", ppsf: 380 },
+  "Las Vegas": { lat: 36.17, lng: -115.14, state: "NV", ppsf: 340 },
+};
+
+const CURATED: Development[] = [
   // ── Austin, TX ──────────────────────────────────────────────
   { id: "atx-1", name: "East 5th Rowhomes", developer: "Lariat Homes", city: "Austin", state: "TX", lat: 30.2585, lng: -97.7185, productType: "Fourplex", units: 4, landSqft: 6500, buildingSqft: 5200, stories: 3, status: "Under construction", approvedDate: "2025-11-12", estValue: 1_340_000, pricePerSqft: 220, description: "Four-unit infill build replacing a tear-down on a corner lot." },
   { id: "atx-2", name: "South Lamar Triplex", developer: "Cedar & Pine LLC", city: "Austin", state: "TX", lat: 30.2461, lng: -97.7892, productType: "Small multi", units: 3, landSqft: 7100, buildingSqft: 4800, stories: 2, status: "Permitted", approvedDate: "2026-02-03", estValue: 1_180_000, pricePerSqft: 235, description: "Three detached units around a shared courtyard." },
@@ -128,6 +155,9 @@ export const developments: Development[] = [
   { id: "las-1", name: "Arts District Small Multi", developer: "Mojave Vertical", city: "Las Vegas", state: "NV", lat: 36.1560, lng: -115.1530, productType: "Small multi", units: 6, landSqft: 10200, buildingSqft: 7800, stories: 3, status: "Permitted", approvedDate: "2026-02-05", estValue: 2_040_000, pricePerSqft: 185, description: "Six-unit build in the 18b Arts District." },
   { id: "las-2", name: "Huntridge Duplex", developer: "Mojave Vertical", city: "Las Vegas", state: "NV", lat: 36.1480, lng: -115.1340, productType: "Duplex", units: 2, landSqft: 5100, buildingSqft: 3000, stories: 2, status: "Approved", approvedDate: "2026-03-28", estValue: 650_000, pricePerSqft: 180, description: "Duplex in the historic Huntridge neighborhood." },
 ];
+
+/** Curated projects plus generated density around each metro (for clustering). */
+export const developments: Development[] = [...CURATED, ...generateExtra()];
 
 export interface DevStats {
   count: number;
@@ -233,13 +263,6 @@ export const QUARTERS = [
   "Q3 '24", "Q4 '24", "Q1 '25", "Q2 '25", "Q3 '25", "Q4 '25", "Q1 '26", "Q2 '26",
 ];
 
-const METRO_BASE_PPSF: Record<string, number> = {
-  Austin: 470, Dallas: 360, Houston: 320, Phoenix: 360, Denver: 520,
-  Nashville: 420, Atlanta: 360, Tampa: 360, Miami: 1350, Charlotte: 360,
-  Raleigh: 360, Seattle: 720, Portland: 560, Columbus: 300,
-  "Salt Lake City": 470, Boise: 380, "Las Vegas": 340,
-};
-
 export interface PpsfPoint {
   quarter: string;
   ppsf: number;
@@ -249,7 +272,7 @@ export interface PpsfPoint {
 
 /** Rolling new-construction $/sqft by quarter with a confidence band. */
 export function metroTrend(city: string): PpsfPoint[] {
-  const base = METRO_BASE_PPSF[city] ?? 350;
+  const base = METRO_CENTERS[city]?.ppsf ?? 350;
   return QUARTERS.map((quarter, i) => {
     const ppsf = Math.round(base * (0.8 + i * 0.029));
     return { quarter, ppsf, low: Math.round(ppsf * 0.87), high: Math.round(ppsf * 1.13) };
@@ -269,4 +292,98 @@ export function ppsfSummary(city: string): PpsfSummary {
   const thresh = cur.ppsf * 0.92;
   const idx = t.findIndex((p) => p.ppsf >= thresh);
   return { current: cur.ppsf, low: cur.low, high: cur.high, since: QUARTERS[idx < 0 ? 0 : idx] };
+}
+
+// ── Renderings / photos ─────────────────────────────────────────────────────
+// Representative architecture photos by product type (stable Unsplash CDN URLs).
+// Live listing/render photos replace these from the MLS/Zillow feed once wired.
+const IMAGE_POOL: Record<ProductType, string[]> = {
+  SFH: [
+    "1568605114967-8130f3a36994", "1564013799919-ab600027ffc6", "1570129477492-45c003edd2be",
+  ],
+  Infill: [
+    "1512917774080-9991f1c4c750", "1605276374104-dee2a0ed3cd6", "1600585154340-be6161a56a0c",
+  ],
+  Duplex: [
+    "1576941089067-2de3c901e126", "1580587771525-78b9dba3b914", "1600566753086-00f18fb6b3ea",
+  ],
+  Fourplex: [
+    "1600596542815-ffad4c1539a9", "1600607687939-ce8a6c25118c", "1600047509807-ba8f99d2cdde",
+  ],
+  Townhomes: [
+    "1580216643062-cf460548a66a", "1600585152220-90363fe7e115", "1605146769289-440113cc3d00",
+  ],
+  "Small multi": [
+    "1545324418-cc1a3fa10c00", "1486406146926-c627a92ad1ab", "1493809842364-78817add7ffb",
+  ],
+};
+
+/** Deterministic representative image URL for a development. */
+export function imageFor(d: Development): string {
+  const pool = IMAGE_POOL[d.productType];
+  const id = pool[hashId(d.id) % pool.length];
+  return `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=900&q=70`;
+}
+
+/** Guaranteed-load fallback if a photo 404s. */
+export function imageFallback(d: Development): string {
+  return `https://picsum.photos/seed/${encodeURIComponent(d.id)}/900/500`;
+}
+
+// ── Generated density around each metro (so clustering has volume) ───────────
+function generateExtra(): Development[] {
+  const STREETS = [
+    "Magnolia", "Oakwood", "Cedar", "Birch", "Harborview", "Sunset", "Maple",
+    "Ridgeline", "Lincoln", "Pearl", "Vista", "Juniper", "Highland", "Lakeshore", "Cypress",
+  ];
+  const DEVS = [
+    "Summit Build Group", "Anchor Residential", "Northstar Homes", "Keystone Developments",
+    "Vanguard Build Co.", "Outpost Homes", "Trailhead Build", "Beacon Residential",
+  ];
+  const UNITS_BY_TYPE: Record<ProductType, number> = {
+    SFH: 1, Infill: 1, Duplex: 2, Fourplex: 4, Townhomes: 6, "Small multi": 6,
+  };
+  const SQFT_PER_UNIT: Record<ProductType, number> = {
+    SFH: 2600, Infill: 2500, Duplex: 1500, Fourplex: 1250, Townhomes: 1450, "Small multi": 1300,
+  };
+
+  const out: Development[] = [];
+  const cities = Object.keys(METRO_CENTERS);
+  cities.forEach((city, ci) => {
+    const m = METRO_CENTERS[city];
+    const tierMult = m.ppsf >= 600 ? 1.5 : m.ppsf >= 450 ? 1.25 : 1.0;
+    const buildPpsf = Math.round(180 + (m.ppsf >= 600 ? 60 : m.ppsf >= 450 ? 30 : 0));
+    for (let i = 0; i < 9; i++) {
+      const type = PRODUCT_TYPES[(ci + i) % PRODUCT_TYPES.length];
+      const status = STATUSES[(i + ci) % STATUSES.length];
+      const units = UNITS_BY_TYPE[type] + (type === "Townhomes" || type === "Small multi" ? i % 3 : 0);
+      const buildingSqft = units * SQFT_PER_UNIT[type];
+      const landSqft = Math.round(buildingSqft * 1.3);
+      const estValue = Math.round((units * 260_000 * tierMult) / 1000) * 1000;
+      const angle = ci * 2.4 + i * 1.7;
+      const ring = 0.04 + (i % 3) * 0.03;
+      const lat = +(m.lat + Math.sin(angle) * ring).toFixed(4);
+      const lng = +(m.lng + Math.cos(angle) * ring * 1.3).toFixed(4);
+      out.push({
+        id: `gen-${ci}-${i}`,
+        name: `${STREETS[(ci + i) % STREETS.length]} ${type}`,
+        developer: DEVS[(ci + i) % DEVS.length],
+        city,
+        state: m.state,
+        lat,
+        lng,
+        productType: type,
+        units,
+        landSqft,
+        buildingSqft,
+        stories: type === "SFH" || type === "Infill" ? 2 : 3,
+        status,
+        approvedDate: addMonths("2026-05-01", -((i + ci) % 16)),
+        estValue,
+        pricePerSqft: buildPpsf,
+        description: `${type} ${status.toLowerCase()} project in ${city}.`,
+      });
+    }
+  });
+  return out;
 }

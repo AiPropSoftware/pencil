@@ -1,5 +1,7 @@
 import * as React from "react";
-import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Marker, Tooltip, useMap, useMapEvents } from "react-leaflet";
+import L from "leaflet";
+import Supercluster from "supercluster";
 import "leaflet/dist/leaflet.css";
 import { Link } from "react-router-dom";
 import {
@@ -12,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { fmtMoney, fmtNumber } from "@/lib/format";
 import {
   developments, summarize, metroTrend, ppsfSummary, listingInfo, permitTimeline, architectFor,
+  imageFor, imageFallback,
   PRODUCT_TYPES, STATUSES, TYPE_COLOR,
   type Development, type ProductType, type DevStatus,
 } from "@/data/developments";
@@ -48,6 +51,101 @@ function FitOnPlace({ place, points }: { place: string; points: Development[] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [place]);
   return null;
+}
+
+/** Viewport-aware clustering via supercluster — scales to thousands of pins. */
+function Clusters({
+  points, selectedId, onSelect,
+}: { points: Development[]; selectedId: string | null; onSelect: (d: Development) => void }) {
+  const [view, setView] = React.useState<{ bbox: [number, number, number, number]; zoom: number } | null>(null);
+
+  const map = useMapEvents({
+    moveend: () => syncView(),
+    zoomend: () => syncView(),
+  });
+
+  function syncView() {
+    const b = map.getBounds();
+    setView({ bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], zoom: map.getZoom() });
+  }
+
+  React.useEffect(() => { syncView(); /* initial */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const byId = React.useMemo(() => {
+    const m = new Map<string, Development>();
+    points.forEach((p) => m.set(p.id, p));
+    return m;
+  }, [points]);
+
+  const index = React.useMemo(() => {
+    const sc = new Supercluster<{ devId: string }>({ radius: 58, maxZoom: 15 });
+    sc.load(
+      points.map((p) => ({
+        type: "Feature" as const,
+        properties: { devId: p.id },
+        geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
+      })),
+    );
+    return sc;
+  }, [points]);
+
+  const clusters = React.useMemo(() => {
+    if (!view) return [];
+    try {
+      return index.getClusters(view.bbox, Math.floor(view.zoom));
+    } catch {
+      return [];
+    }
+  }, [index, view]);
+
+  return (
+    <>
+      {clusters.map((c) => {
+        const [lng, lat] = c.geometry.coordinates;
+        const props = c.properties as { cluster?: boolean; point_count?: number; devId?: string };
+
+        if (props.cluster) {
+          const count = props.point_count ?? 0;
+          const size = Math.round(32 + Math.min(30, Math.log2(count + 1) * 8));
+          const icon = L.divIcon({
+            className: "",
+            iconSize: [size, size],
+            html: `<div style="width:${size}px;height:${size}px;border-radius:9999px;display:flex;align-items:center;justify-content:center;background:rgba(200,165,92,0.92);color:#1a1612;font-weight:600;font-size:12px;border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.25)">${count}</div>`,
+          });
+          return (
+            <Marker
+              key={`cluster-${c.id}`}
+              position={[lat, lng]}
+              icon={icon}
+              eventHandlers={{
+                click: () => {
+                  const z = Math.min(index.getClusterExpansionZoom(c.id as number), 16);
+                  map.flyTo([lat, lng], z, { duration: 0.6 });
+                },
+              }}
+            />
+          );
+        }
+
+        const dev = byId.get(props.devId as string);
+        if (!dev) return null;
+        const isSel = selectedId === dev.id;
+        return (
+          <CircleMarker
+            key={dev.id}
+            center={[lat, lng]}
+            radius={isSel ? 11 : 7}
+            pathOptions={{ color: "#fff", weight: 2, fillColor: TYPE_COLOR[dev.productType], fillOpacity: isSel ? 1 : 0.85 }}
+            eventHandlers={{ click: () => onSelect(dev) }}
+          >
+            <Tooltip direction="top" offset={[0, -6]}>
+              <span className="text-xs"><strong>{dev.name}</strong> · {dev.productType} · {dev.units} {dev.units === 1 ? "unit" : "units"}</span>
+            </Tooltip>
+          </CircleMarker>
+        );
+      })}
+    </>
+  );
 }
 
 export default function MapPage() {
@@ -112,22 +210,7 @@ export default function MapPage() {
                   url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                 />
                 <FitOnPlace place={place} points={matches} />
-                {visible.map((d) => {
-                  const isSel = selected?.id === d.id;
-                  return (
-                    <CircleMarker
-                      key={d.id}
-                      center={[d.lat, d.lng]}
-                      radius={isSel ? 11 : 7}
-                      pathOptions={{ color: "#fff", weight: 2, fillColor: TYPE_COLOR[d.productType], fillOpacity: isSel ? 1 : 0.85 }}
-                      eventHandlers={{ click: () => setSelected(d) }}
-                    >
-                      <Tooltip direction="top" offset={[0, -6]}>
-                        <span className="text-xs"><strong>{d.name}</strong> · {d.productType} · {d.units} {d.units === 1 ? "unit" : "units"}</span>
-                      </Tooltip>
-                    </CircleMarker>
-                  );
-                })}
+                <Clusters points={matches} selectedId={selected?.id ?? null} onSelect={setSelected} />
               </MapContainer>
 
               <div className="absolute bottom-3 left-3 z-[1000] rounded-md border border-border bg-card/95 backdrop-blur px-3 py-2 shadow-card">
@@ -252,6 +335,10 @@ function DevelopmentDrawer({ dev, onClose }: { dev: Development; onClose: () => 
   const architect = architectFor(dev);
   const ppsf = ppsfSummary(dev.city);
   const trend = metroTrend(dev.city);
+  const comps = developments
+    .filter((d) => d.city === dev.city && d.id !== dev.id)
+    .slice(0, 4)
+    .map((d) => ({ id: d.id, name: d.name, ppsf: Math.round(d.estValue / d.buildingSqft) }));
   const analyzerHref = `/deal-analyzer?arv=${dev.estValue}&costPerSqft=${dev.pricePerSqft}&address=${encodeURIComponent(
     `${dev.name}, ${dev.city}, ${dev.state}`,
   )}`;
@@ -260,12 +347,27 @@ function DevelopmentDrawer({ dev, onClose }: { dev: Development; onClose: () => 
     <div className="fixed inset-0 z-[2000] grid place-items-end" onClick={onClose}>
       <div className="absolute inset-0 bg-foreground/20 backdrop-blur-sm" />
       <div className="relative h-full w-full sm:w-[460px] bg-card border-l border-border shadow-elevated overflow-y-auto animate-fade-in" onClick={(e) => e.stopPropagation()}>
+        {/* Building image / rendering */}
+        <div className="relative h-48 w-full bg-secondary">
+          <img
+            src={imageFor(dev)}
+            alt={`${dev.name} rendering`}
+            className="h-full w-full object-cover"
+            loading="lazy"
+            onError={(e) => {
+              const img = e.currentTarget;
+              if (img.dataset.fallback !== "1") { img.dataset.fallback = "1"; img.src = imageFallback(dev); }
+            }}
+          />
+          <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/45 to-transparent" />
+          <button onClick={onClose} className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-card/90 text-foreground shadow-card hover:bg-card">
+            <X className="h-4 w-4" />
+          </button>
+          <span className="absolute left-3 top-3"><Badge variant="gold">{dev.status}</Badge></span>
+          <span className="absolute bottom-2 right-3 text-[10px] text-white/80">representative rendering</span>
+        </div>
         <div className="p-6">
-          <div className="flex items-start justify-between">
-            <Badge variant="gold">{dev.status}</Badge>
-            <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
-          </div>
-          <h2 className="mt-3 font-display text-2xl">{dev.name}</h2>
+          <h2 className="font-display text-2xl">{dev.name}</h2>
           <p className="mt-1 text-sm text-muted-foreground">{dev.city}, {dev.state}</p>
           <span className="mt-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-white" style={{ background: TYPE_COLOR[dev.productType] }}>{dev.productType}</span>
           <p className="mt-4 text-sm text-foreground/90 leading-relaxed">{dev.description}</p>
@@ -350,6 +452,20 @@ function DevelopmentDrawer({ dev, onClose }: { dev: Development; onClose: () => 
               ]}
             />
           </Section>
+
+          {/* Comparable projects nearby */}
+          {comps.length > 0 && (
+            <Section title={`Comparable projects in ${dev.city}`} tag="from active pipeline">
+              <ul className="space-y-1.5">
+                {comps.map((c) => (
+                  <li key={c.id} className="flex items-center justify-between text-sm">
+                    <span className="text-foreground truncate pr-3">{c.name}</span>
+                    <span className="text-gold font-medium tabular-nums">${c.ppsf}/sf</span>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          )}
 
           {/* Build cost + underwrite */}
           <div className="mt-6 rounded-md border border-border bg-secondary/40 p-4">
