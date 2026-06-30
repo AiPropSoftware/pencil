@@ -18,6 +18,7 @@ import {
   PRODUCT_TYPES, STATUSES, TYPE_COLOR,
   type Development, type ProductType, type DevStatus,
 } from "@/data/developments";
+import { fetchCityDevelopments, AUSTIN } from "@/providers/permits/socrata";
 import {
   Search, X, ArrowRight, Building2, CalendarDays, Ruler, Layers3,
   TrendingUp, ExternalLink, HardHat, PencilRuler, Plus,
@@ -155,19 +156,41 @@ export default function MapPage() {
   const [visibleCount, setVisibleCount] = React.useState(PAGE);
   const [selected, setSelected] = React.useState<Development | null>(null);
 
+  // Live city permits ("our own Shovels"). Austin first; falls back to demo.
+  const [liveAustin, setLiveAustin] = React.useState<Development[] | null>(null);
+  const [liveStatus, setLiveStatus] = React.useState<"loading" | "live" | "demo">("loading");
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchCityDevelopments(AUSTIN)
+      .then((rows) => {
+        if (cancelled) return;
+        if (rows.length > 0) { setLiveAustin(rows); setLiveStatus("live"); }
+        else setLiveStatus("demo");
+      })
+      .catch((e) => { console.warn("[Pencil] live Austin permits unavailable:", e); if (!cancelled) setLiveStatus("demo"); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Swap demo Austin for live permits when available; other metros stay demo.
+  const allDevelopments = React.useMemo(() => {
+    if (!liveAustin) return developments;
+    return [...developments.filter((d) => d.city !== "Austin"), ...liveAustin];
+  }, [liveAustin]);
+
   // Reset pagination whenever the search/filters change.
   React.useEffect(() => { setVisibleCount(PAGE); }, [place, types, statuses]);
 
   const matches = React.useMemo(
     () =>
-      developments.filter(
+      allDevelopments.filter(
         (d) =>
           types.has(d.productType) &&
           statuses.has(d.status) &&
           (place.trim() === "" ||
             `${d.name} ${d.developer} ${d.city} ${d.state}`.toLowerCase().includes(place.trim().toLowerCase())),
       ),
-    [types, statuses, place],
+    [allDevelopments, types, statuses, place],
   );
 
   const visible = matches.slice(0, visibleCount);
@@ -191,6 +214,16 @@ export default function MapPage() {
               across the US. Search a city or state to focus, then drill into any
               project for listing, sale, builder, and permit detail.
             </p>
+            <div className="mt-2 inline-flex items-center gap-2 text-xs">
+              {liveStatus === "live" ? (
+                <Badge variant="gold">● Austin: live city permits ({liveAustin?.length ?? 0})</Badge>
+              ) : liveStatus === "loading" ? (
+                <span className="text-muted-foreground">Loading live Austin permits…</span>
+              ) : (
+                <span className="text-muted-foreground">Austin live feed unavailable — showing demo data</span>
+              )}
+              <span className="text-muted-foreground">· other metros: demo</span>
+            </div>
           </div>
           <div className="flex gap-3">
             <StatChip label="Projects" value={fmtNumber(stats.count)} />
