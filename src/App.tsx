@@ -28,34 +28,15 @@ export default function App() {
           {/* Public: the Deal Analyzer is the free, client-side "try it" tool.
               Only "Save Deal" requires an account. */}
           <Route path="/deal-analyzer" element={<DealAnalyzer />} />
-          <Route
-            path="/map"
-            element={
-              <RequireAuth requireRole="pro">
-                <MapPage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/comps"
-            element={
-              <RequireAuth requireRole="pro">
-                <Comps />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/builders"
-            element={
-              <RequireAuth requireRole="pro">
-                <Builders />
-              </RequireAuth>
-            }
-          />
+          {/* Core browsing is open — the map, comps, and builder directory
+              work for everyone. Sign-up unlocks saving + personalization. */}
+          <Route path="/map" element={<MapPage />} />
+          <Route path="/comps" element={<Comps />} />
+          <Route path="/builders" element={<Builders />} />
           <Route
             path="/library"
             element={
-              <RequireAuth requireRole="pro">
+              <RequireAuth requireRole="free">
                 <Library />
               </RequireAuth>
             }

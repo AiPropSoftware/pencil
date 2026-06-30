@@ -1,8 +1,14 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+// Public project defaults (URL + publishable key are designed to be exposed in
+// the client — security is enforced by RLS, not key secrecy). Env vars override
+// so different environments can point elsewhere.
+const DEFAULT_URL = "https://hhhpochstmzjglzyyvoj.supabase.co";
+const DEFAULT_ANON_KEY = "sb_publishable_IjXg9NzzGLbOyquTP-S21A_MCtBOmyP";
+
+const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined) || DEFAULT_URL;
+const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || DEFAULT_ANON_KEY;
 
 /**
  * Supabase client. We construct lazily so the app still boots in environments

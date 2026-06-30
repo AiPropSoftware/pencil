@@ -40,8 +40,10 @@ revoke all on function public.set_user_role(uuid, public.app_role) from public;
 grant execute on function public.set_user_role(uuid, public.app_role) to authenticated;
 
 -- Convenience view: every profile joined with its current role.
--- Read-protected by profiles' RLS (admins only see all rows).
-create or replace view public.profile_with_role as
+-- security_invoker = true makes the view respect the QUERYING user's RLS
+-- (Postgres 15+), so non-admins only ever see their own profile row through it.
+create or replace view public.profile_with_role
+with (security_invoker = true) as
 select
   p.id,
   p.email,
