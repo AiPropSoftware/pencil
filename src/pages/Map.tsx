@@ -192,7 +192,17 @@ export default function MapPage() {
     [kindFilter, place, dealsOnly],
   );
 
-  const activeList = layer === "construction" ? devMatches : listingMatches;
+  // Auto-finder: score every listing and float the best deals to the top.
+  const scoredListings = React.useMemo(
+    () => listingMatches
+      .map((l) => ({ l, opp: listingOpportunity(l) }))
+      .sort((a, b) => (b.opp.atPrice?.margin ?? 0) - (a.opp.atPrice?.margin ?? 0)),
+    [listingMatches],
+  );
+  const dealCount = scoredListings.filter((s) => s.opp.atPrice?.isDeal).length;
+  const bestMargin = scoredListings[0]?.opp.atPrice?.margin ?? 0;
+
+  const activeList = layer === "construction" ? devMatches : scoredListings.map((s) => s.l);
   const visible = activeList.slice(0, visibleCount);
   const hasMore = visibleCount < activeList.length;
 
@@ -256,6 +266,12 @@ export default function MapPage() {
       <div className="grid lg:grid-cols-[380px_1fr]">
         {/* Listing rail */}
         <div className="order-2 lg:order-1 border-r border-border/60 max-h-[calc(100vh-9rem)] overflow-y-auto">
+          {layer === "listings" && dealCount > 0 && (
+            <div className="mx-3 mt-3 rounded-md border border-gold/40 bg-gold-muted/40 p-2.5 text-xs">
+              <span className="font-medium text-foreground">🔥 {dealCount} deal{dealCount > 1 ? "s" : ""}</span>
+              <span className="text-muted-foreground"> in {place || "view"} · best margin {fmtPct(bestMargin)} · ranked below</span>
+            </div>
+          )}
           <div className="p-3 text-xs text-muted-foreground flex items-center justify-between">
             <span>{activeList.length} {layer === "construction" ? "projects" : "listings"}{place ? ` in “${place}”` : ""}</span>
             {!place && <span className="text-gold">Search a city to focus</span>}
