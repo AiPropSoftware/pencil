@@ -19,11 +19,14 @@ import {
   type Development, type ProductType,
 } from "@/data/developments";
 import { listings, LISTING_KINDS, LISTING_COLOR, type Listing, type ListingKind } from "@/data/listings";
-import { fetchCityDevelopments, AUSTIN, type CityResult } from "@/providers/permits/socrata";
-import { scoreOpportunity, buildPpsf, targetMarginFor } from "@/lib/underwrite/opportunity";
+import { fetchAllCityDevelopments, type LivePermits } from "@/providers/permits/socrata";
+import { scoreOpportunity, buildPpsf } from "@/lib/underwrite/opportunity";
+import { useWatchlist } from "@/hooks/useWatchlist";
+import { toast } from "sonner";
 import {
   Search, X, ArrowRight, Building2, CalendarDays, Ruler, Layers3, TrendingUp,
   ExternalLink, HardHat, PencilRuler, Plus, Sparkles, Globe, Home, Hammer,
+  Heart, Link2,
 } from "lucide-react";
 
 const US_CENTER: [number, number] = [39.5, -98.35];
@@ -154,44 +157,98 @@ function listingOpportunity(l: Listing) {
 
 // ── Main single-surface app ─────────────────────────────────────────────────
 export default function MapPage() {
-  const [layer, setLayer] = React.useState<Layer>("construction");
-  const [place, setPlace] = React.useState("");
+  // Resume where the user left off (layer + search persist across visits).
+  const [layer, setLayer] = React.useState<Layer>(
+    () => (localStorage.getItem("pencil:layer") as Layer) || "construction",
+  );
+  const [place, setPlace] = React.useState(() => localStorage.getItem("pencil:place") ?? "");
+  React.useEffect(() => { localStorage.setItem("pencil:layer", layer); }, [layer]);
+  React.useEffect(() => { localStorage.setItem("pencil:place", place); }, [place]);
+
   const [typeFilter, setTypeFilter] = React.useState<Set<ProductType>>(new Set(PRODUCT_TYPES));
   const [kindFilter, setKindFilter] = React.useState<Set<ListingKind>>(new Set(LISTING_KINDS));
   const [visibleCount, setVisibleCount] = React.useState(PAGE);
   const [selected, setSelected] = React.useState<Selection>(null);
   const [dealsOnly, setDealsOnly] = React.useState(false);
+  const [fly, setFly] = React.useState<{ lat: number; lng: number } | null>(null);
 
-  const [liveResult, setLiveResult] = React.useState<CityResult | null>(null);
+  // Watchlist — hearts persist across visits.
+  const { ids: watched, toggle: toggleWatch } = useWatchlist();
+  const [watchOnly, setWatchOnly] = React.useState(false);
+
+  // Live multi-city permit feeds.
+  const [live, setLive] = React.useState<LivePermits | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
-    fetchCityDevelopments(AUSTIN, 8000)
-      .then((r) => { if (!cancelled) setLiveResult(r); })
-      .catch((e) => { if (!cancelled) setLiveResult({ items: [], total: 0, columns: [], url: "", error: String(e) }); });
+    fetchAllCityDevelopments()
+      .then((r) => { if (!cancelled) setLive(r); })
+      .catch(() => { if (!cancelled) setLive({ perCity: [], items: [], liveCityNames: [] }); });
     return () => { cancelled = true; };
   }, []);
 
-  const liveAustin = liveResult && liveResult.items.length > 0 ? liveResult.items : null;
-  const liveStatus: "loading" | "live" | "demo" = !liveResult ? "loading" : liveAustin ? "live" : "demo";
-
-  React.useEffect(() => { setVisibleCount(PAGE); }, [place, layer, typeFilter, kindFilter, dealsOnly]);
+  React.useEffect(() => { setVisibleCount(PAGE); }, [place, layer, typeFilter, kindFilter, dealsOnly, watchOnly]);
 
   const allDevs = React.useMemo(() => {
-    if (!liveAustin) return developments;
-    return [...developments.filter((d) => d.city !== "Austin"), ...liveAustin];
-  }, [liveAustin]);
+    if (!live || live.items.length === 0) return developments;
+    return [...developments.filter((d) => !live.liveCityNames.includes(d.city)), ...live.items];
+  }, [live]);
+
+  // "What's new since your last visit" — the comeback hook.
+  const [newCount, setNewCount] = React.useState(0);
+  React.useEffect(() => {
+    if (!live || live.items.length === 0) return;
+    const KEY = "pencil:lastSeenPermitDate";
+    const last = localStorage.getItem(KEY);
+    const maxDate = live.items.reduce((m, d) => (d.approvedDate > m ? d.approvedDate : m), "");
+    if (last) setNewCount(live.items.filter((d) => d.approvedDate > last).length);
+    if (maxDate) localStorage.setItem(KEY, maxDate);
+  }, [live]);
+
+  // Selection with shareable deep-links (?pin=<id>).
+  const select = React.useCallback((sel: Selection) => {
+    setSelected(sel);
+    if (sel) window.history.replaceState(null, "", `?pin=${encodeURIComponent(sel.data.id)}`);
+    else window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+
+  const deepLinkDone = React.useRef(false);
+  React.useEffect(() => {
+    if (deepLinkDone.current) return;
+    const pin = new URLSearchParams(window.location.search).get("pin");
+    if (!pin) { deepLinkDone.current = true; return; }
+    const d = allDevs.find((x) => x.id === pin);
+    if (d) {
+      setSelected({ kind: "dev", data: d });
+      setFly({ lat: d.lat, lng: d.lng });
+      deepLinkDone.current = true;
+      return;
+    }
+    const l = listings.find((x) => x.id === pin);
+    if (l) {
+      setSelected({ kind: "listing", data: l });
+      setFly({ lat: l.lat, lng: l.lng });
+      deepLinkDone.current = true;
+    }
+    // If not found yet, retry when live data lands (effect re-runs on allDevs).
+  }, [allDevs]);
 
   const matchesPlace = (s: string) => place.trim() === "" || s.toLowerCase().includes(place.trim().toLowerCase());
 
   const devMatches = React.useMemo(
-    () => allDevs.filter((d) => typeFilter.has(d.productType) && matchesPlace(`${d.name} ${d.developer} ${d.city} ${d.state}`)),
-    [allDevs, typeFilter, place],
+    () => allDevs.filter((d) =>
+      typeFilter.has(d.productType) &&
+      matchesPlace(`${d.name} ${d.developer} ${d.city} ${d.state}`) &&
+      (!watchOnly || watched.has(d.id))),
+    [allDevs, typeFilter, place, watchOnly, watched],
   );
   const listingMatches = React.useMemo(
-    () => listings.filter((l) => kindFilter.has(l.kind) && matchesPlace(`${l.address} ${l.city} ${l.state} ${l.kind}`)
-      && (!dealsOnly || listingOpportunity(l).atPrice?.isDeal)),
-    [kindFilter, place, dealsOnly],
+    () => listings.filter((l) =>
+      kindFilter.has(l.kind) &&
+      matchesPlace(`${l.address} ${l.city} ${l.state} ${l.kind}`) &&
+      (!dealsOnly || listingOpportunity(l).atPrice?.isDeal) &&
+      (!watchOnly || watched.has(l.id))),
+    [kindFilter, place, dealsOnly, watchOnly, watched],
   );
 
   // Auto-finder: score every listing and float the best deals to the top.
@@ -214,7 +271,7 @@ export default function MapPage() {
         id: d.id, lat: d.lat, lng: d.lng, color: TYPE_COLOR[d.productType], deal: false,
         selected: selected?.kind === "dev" && selected.data.id === d.id,
         label: `${d.name} · ${d.productType}`,
-        onClick: () => setSelected({ kind: "dev", data: d }),
+        onClick: () => select({ kind: "dev", data: d }),
       }));
     }
     return listingMatches.map((l) => ({
@@ -222,9 +279,9 @@ export default function MapPage() {
       deal: !!listingOpportunity(l).atPrice?.isDeal,
       selected: selected?.kind === "listing" && selected.data.id === l.id,
       label: `${l.kind} · ${fmtMoney(l.listPrice)}`,
-      onClick: () => setSelected({ kind: "listing", data: l }),
+      onClick: () => select({ kind: "listing", data: l }),
     }));
-  }, [layer, devMatches, listingMatches, selected]);
+  }, [layer, devMatches, listingMatches, selected, select]);
 
   return (
     <div className="flex flex-col">
@@ -248,7 +305,14 @@ export default function MapPage() {
               <Sparkles className="h-4 w-4 text-gold" /> Deals only
             </button>
           )}
-          <LiveStatusChip result={liveResult} status={liveStatus} count={liveAustin?.length ?? 0} />
+          <button
+            onClick={() => setWatchOnly((v) => !v)}
+            className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm ${watchOnly ? "border-gold bg-gold-muted text-foreground" : "border-border text-muted-foreground hover:text-foreground"}`}
+            title="Show only properties you're watching"
+          >
+            <Heart className={`h-4 w-4 ${watchOnly ? "text-gold fill-current" : ""}`} /> Watchlist{watched.size > 0 ? ` (${watched.size})` : ""}
+          </button>
+          <LiveStatusChip live={live} />
         </div>
         {/* Filter chips */}
         <div className="container pb-3 flex flex-wrap gap-1.5">
@@ -272,6 +336,12 @@ export default function MapPage() {
               <span className="text-muted-foreground"> in {place || "view"} · best margin {fmtPct(bestMargin)} · ranked below</span>
             </div>
           )}
+          {layer === "construction" && newCount > 0 && (
+            <div className="mx-3 mt-3 rounded-md border border-gold/40 bg-gold-muted/40 p-2.5 text-xs">
+              <span className="font-medium text-foreground">● {newCount} new permit{newCount > 1 ? "s" : ""} filed</span>
+              <span className="text-muted-foreground"> since your last visit — real public records</span>
+            </div>
+          )}
           <div className="p-3 text-xs text-muted-foreground flex items-center justify-between">
             <span>{activeList.length} {layer === "construction" ? "projects" : "listings"}{place ? ` in “${place}”` : ""}</span>
             {!place && <span className="text-gold">Search a city to focus</span>}
@@ -279,8 +349,22 @@ export default function MapPage() {
           <div className="px-3 pb-3 space-y-2">
             {visible.map((item) =>
               layer === "construction"
-                ? <DevCard key={(item as Development).id} d={item as Development} selected={selected?.kind === "dev" && selected.data.id === (item as Development).id} onClick={() => setSelected({ kind: "dev", data: item as Development })} />
-                : <ListingCard key={(item as Listing).id} l={item as Listing} selected={selected?.kind === "listing" && selected.data.id === (item as Listing).id} onClick={() => setSelected({ kind: "listing", data: item as Listing })} />,
+                ? <DevCard
+                    key={(item as Development).id}
+                    d={item as Development}
+                    selected={selected?.kind === "dev" && selected.data.id === (item as Development).id}
+                    watched={watched.has((item as Development).id)}
+                    onWatch={() => toggleWatch((item as Development).id)}
+                    onClick={() => { const d = item as Development; select({ kind: "dev", data: d }); setFly({ lat: d.lat, lng: d.lng }); }}
+                  />
+                : <ListingCard
+                    key={(item as Listing).id}
+                    l={item as Listing}
+                    selected={selected?.kind === "listing" && selected.data.id === (item as Listing).id}
+                    watched={watched.has((item as Listing).id)}
+                    onWatch={() => toggleWatch((item as Listing).id)}
+                    onClick={() => { const l = item as Listing; select({ kind: "listing", data: l }); setFly({ lat: l.lat, lng: l.lng }); }}
+                  />,
             )}
             {activeList.length === 0 && <p className="text-sm text-muted-foreground py-8 text-center">Nothing matches. Try another city or widen the filters.</p>}
             {hasMore && (
@@ -299,6 +383,7 @@ export default function MapPage() {
               url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             />
             <FitOnPlace place={place} points={activeList.map((p) => ({ lat: p.lat, lng: p.lng }))} />
+            <FlyToTarget target={fly} />
             <Clusters pins={pins} />
           </MapContainer>
           <div className="absolute bottom-3 left-3 z-[1000] rounded-md border border-border bg-card/95 backdrop-blur px-3 py-2 shadow-card">
@@ -314,8 +399,22 @@ export default function MapPage() {
         </div>
       </div>
 
-      {selected?.kind === "dev" && <DevelopmentPanel dev={selected.data} onClose={() => setSelected(null)} />}
-      {selected?.kind === "listing" && <ListingPanel listing={selected.data} onClose={() => setSelected(null)} />}
+      {selected?.kind === "dev" && (
+        <DevelopmentPanel
+          dev={selected.data}
+          watched={watched.has(selected.data.id)}
+          onWatch={() => toggleWatch(selected.data.id)}
+          onClose={() => select(null)}
+        />
+      )}
+      {selected?.kind === "listing" && (
+        <ListingPanel
+          listing={selected.data}
+          watched={watched.has(selected.data.id)}
+          onWatch={() => toggleWatch(selected.data.id)}
+          onClose={() => select(null)}
+        />
+      )}
     </div>
   );
 }
@@ -324,38 +423,60 @@ function toggleSet<T>(setter: React.Dispatch<React.SetStateAction<Set<T>>>, v: T
   setter((prev) => { const n = new Set(prev); n.has(v) ? n.delete(v) : n.add(v); return n; });
 }
 
-function LiveStatusChip({ result, status, count }: { result: CityResult | null; status: "loading" | "live" | "demo"; count: number }) {
+/** Fly the map to a picked property (rail click / deep link). */
+function FlyToTarget({ target }: { target: { lat: number; lng: number } | null }) {
+  const map = useMap();
+  React.useEffect(() => {
+    if (target) map.flyTo([target.lat, target.lng], 14, { duration: 0.8 });
+  }, [target, map]);
+  return null;
+}
+
+function LiveStatusChip({ live }: { live: LivePermits | null }) {
   const [open, setOpen] = React.useState(false);
+  const total = live?.items.length ?? 0;
+  const cities = live?.liveCityNames ?? [];
+  const label = !live
+    ? "Checking live city feeds…"
+    : total > 0
+      ? `Live · ${cities.length} ${cities.length === 1 ? "city" : "cities"} · ${total} real permits`
+      : "Live feeds: no data";
   return (
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
         className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-2 text-xs text-muted-foreground hover:text-foreground"
       >
-        <span className={`h-2 w-2 rounded-full ${status === "live" ? "bg-gold" : status === "loading" ? "bg-muted-foreground/50" : "bg-destructive/60"}`} />
-        {status === "live" ? `Austin live · ${count} real permits` : status === "loading" ? "Checking Austin feed…" : "Austin feed: no data"}
+        <span className={`h-2 w-2 rounded-full ${total > 0 ? "bg-gold" : !live ? "bg-muted-foreground/50" : "bg-destructive/60"}`} />
+        {label}
         <span className="text-muted-foreground/60">ⓘ</span>
       </button>
       {open && (
-        <div className="absolute right-0 z-[3000] mt-2 w-80 rounded-md border border-border bg-card p-3 shadow-elevated text-xs">
-          <div className="font-medium text-foreground mb-1">Austin open-data permit feed</div>
-          <div className="text-muted-foreground">Rows fetched: <span className="text-foreground">{result?.total ?? "…"}</span> · usable: <span className="text-foreground">{count}</span></div>
-          {result?.url && (
-            <a href={result.url} target="_blank" rel="noreferrer" className="mt-1 block break-all text-gold hover:underline">
-              {result.url}
-            </a>
-          )}
-          {result?.error && <div className="mt-1 text-destructive break-words">Error: {result.error}</div>}
-          {result && result.columns.length > 0 && (
-            <div className="mt-2">
-              <div className="text-muted-foreground mb-1">Columns the city returned:</div>
-              <div className="max-h-40 overflow-y-auto rounded bg-secondary/50 p-2 text-[11px] text-foreground/90 break-words">{result.columns.join(", ")}</div>
-              <p className="mt-2 text-muted-foreground">Screenshot this and send it — I’ll map these fields exactly and expand to more cities.</p>
+        <div className="absolute right-0 z-[3000] mt-2 w-96 rounded-md border border-border bg-card p-3 shadow-elevated text-xs">
+          <div className="font-medium text-foreground mb-2">Live open-data permit feeds</div>
+          {!live && <div className="text-muted-foreground">Loading…</div>}
+          {live?.perCity.map((c) => (
+            <div key={c.city} className="mb-2 border-b border-border/60 pb-2 last:mb-0 last:border-0 last:pb-0">
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-foreground">{c.city}</span>
+                <span className={c.items.length > 0 ? "text-gold" : "text-destructive"}>
+                  {c.items.length > 0 ? `● ${c.items.length} live` : "no data"}
+                </span>
+              </div>
+              <div className="text-muted-foreground">rows {c.total} · usable {c.items.length} ·{" "}
+                <a href={c.url} target="_blank" rel="noreferrer" className="text-gold hover:underline">raw data</a>
+              </div>
+              {c.error && <div className="text-destructive break-words">{c.error}</div>}
+              {c.items.length === 0 && !c.error && c.columns.length > 0 && (
+                <div className="mt-1 max-h-24 overflow-y-auto rounded bg-secondary/50 p-1.5 text-[11px] break-words">
+                  {c.columns.join(", ")}
+                </div>
+              )}
             </div>
-          )}
-          {result && result.total === 0 && !result.error && (
-            <p className="mt-2 text-muted-foreground">The city returned 0 rows — likely a blocked request or changed dataset. Send me a screenshot.</p>
-          )}
+          ))}
+          <p className="mt-2 text-muted-foreground">
+            Screenshot this panel and send it — each city with “no data” gets tuned from its column list.
+          </p>
         </div>
       )}
     </div>
@@ -380,16 +501,32 @@ function FilterPill({ active, onClick, children, color }: { active: boolean; onC
 }
 
 // ── Rail cards ──────────────────────────────────────────────────────────────
-function DevCard({ d, selected, onClick }: { d: Development; selected: boolean; onClick: () => void }) {
-  const opp = devOpportunity(d);
+function WatchHeart({ watched, onWatch }: { watched: boolean; onWatch: () => void }) {
   return (
-    <button onClick={onClick} className={`w-full text-left rounded-md border bg-card overflow-hidden transition-colors hover:bg-secondary/40 ${selected ? "border-gold ring-1 ring-gold/40" : "border-border"}`}>
+    <button
+      onClick={(e) => { e.stopPropagation(); onWatch(); }}
+      className={`grid h-6 w-6 flex-none place-items-center rounded-full transition-colors ${watched ? "text-gold" : "text-muted-foreground/50 hover:text-gold"}`}
+      title={watched ? "Remove from watchlist" : "Add to watchlist"}
+    >
+      <Heart className={`h-4 w-4 ${watched ? "fill-current" : ""}`} />
+    </button>
+  );
+}
+
+function DevCard({ d, selected, watched, onWatch, onClick }: { d: Development; selected: boolean; watched: boolean; onWatch: () => void; onClick: () => void }) {
+  const opp = devOpportunity(d);
+  const isLive = d.id.startsWith("live-");
+  return (
+    <div onClick={onClick} className={`w-full cursor-pointer text-left rounded-md border bg-card overflow-hidden transition-colors hover:bg-secondary/40 ${selected ? "border-gold ring-1 ring-gold/40" : "border-border"}`}>
       <div className="flex gap-3 p-2.5">
         <img src={imageFor(d)} onError={(e) => { const im = e.currentTarget; if (im.dataset.f !== "1") { im.dataset.f = "1"; im.src = imageFallback(d); } }} alt="" className="h-16 w-20 rounded object-cover flex-none bg-secondary" loading="lazy" />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-1">
             <span className="font-medium truncate text-sm">{d.name}</span>
-            <span className="h-2.5 w-2.5 rounded-full flex-none" style={{ background: TYPE_COLOR[d.productType] }} />
+            <span className="flex items-center gap-1">
+              {isLive && <span className="rounded-full bg-gold/15 px-1.5 text-[10px] font-medium text-gold">LIVE</span>}
+              <WatchHeart watched={watched} onWatch={onWatch} />
+            </span>
           </div>
           <div className="text-xs text-muted-foreground">{d.city}, {d.state} · {d.units}u · {d.status}</div>
           <div className="mt-1 text-xs">
@@ -398,26 +535,29 @@ function DevCard({ d, selected, onClick }: { d: Development; selected: boolean; 
           </div>
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 
-function ListingCard({ l, selected, onClick }: { l: Listing; selected: boolean; onClick: () => void }) {
+function ListingCard({ l, selected, watched, onWatch, onClick }: { l: Listing; selected: boolean; watched: boolean; onWatch: () => void; onClick: () => void }) {
   const opp = listingOpportunity(l);
   const deal = opp.atPrice?.isDeal;
   return (
-    <button onClick={onClick} className={`w-full text-left rounded-md border bg-card overflow-hidden transition-colors hover:bg-secondary/40 ${selected ? "border-gold ring-1 ring-gold/40" : "border-border"}`}>
+    <div onClick={onClick} className={`w-full cursor-pointer text-left rounded-md border bg-card overflow-hidden transition-colors hover:bg-secondary/40 ${selected ? "border-gold ring-1 ring-gold/40" : "border-border"}`}>
       <div className="p-2.5">
         <div className="flex items-center justify-between gap-2">
           <span className="font-display text-lg">{fmtMoney(l.listPrice)}</span>
-          {deal ? <Badge variant="gold">Deal · {fmtPct(opp.atPrice!.margin)}</Badge> : <Badge variant="secondary">{fmtPct(opp.atPrice?.margin ?? 0)}</Badge>}
+          <span className="flex items-center gap-1">
+            {deal ? <Badge variant="gold">Deal · {fmtPct(opp.atPrice!.margin)}</Badge> : <Badge variant="secondary">{fmtPct(opp.atPrice?.margin ?? 0)}</Badge>}
+            <WatchHeart watched={watched} onWatch={onWatch} />
+          </span>
         </div>
         <div className="text-sm truncate">{l.address}</div>
         <div className="text-xs text-muted-foreground">
           {l.city}, {l.state} · {l.kind}{l.beds != null ? ` · ${l.beds}bd/${l.baths}ba` : ""} · {fmtNumber(l.lotSqft)} sf lot
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -551,7 +691,28 @@ function PpsfChart({ city }: { city: string }) {
 }
 
 // ── Construction panel ──────────────────────────────────────────────────────
-function DevelopmentPanel({ dev, onClose }: { dev: Development; onClose: () => void }) {
+function ShareWatchRow({ id, watched, onWatch }: { id: string; watched: boolean; onWatch: () => void }) {
+  return (
+    <div className="mt-4 flex gap-2">
+      <Button variant={watched ? "gold" : "outline"} size="sm" className="flex-1" onClick={onWatch}>
+        <Heart className={`h-4 w-4 ${watched ? "fill-current" : ""}`} /> {watched ? "Watching" : "Watch"}
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        className="flex-1"
+        onClick={() => {
+          navigator.clipboard.writeText(`${window.location.origin}/?pin=${encodeURIComponent(id)}`);
+          toast.success("Link copied — opens this exact property.");
+        }}
+      >
+        <Link2 className="h-4 w-4" /> Share
+      </Button>
+    </div>
+  );
+}
+
+function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development; watched: boolean; onWatch: () => void; onClose: () => void }) {
   const listing = listingInfo(dev);
   const permits = permitTimeline(dev);
   const architect = architectFor(dev);
@@ -571,6 +732,8 @@ function DevelopmentPanel({ dev, onClose }: { dev: Development; onClose: () => v
         <p className="mt-1 text-sm text-muted-foreground">{dev.city}, {dev.state}</p>
         <span className="mt-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-white" style={{ background: TYPE_COLOR[dev.productType] }}>{dev.productType}</span>
         <p className="mt-4 text-sm text-foreground/90 leading-relaxed">{dev.description}</p>
+
+        <ShareWatchRow id={dev.id} watched={watched} onWatch={onWatch} />
 
         <StreetWalk lat={dev.lat} lng={dev.lng} />
 
@@ -617,7 +780,7 @@ function DevelopmentPanel({ dev, onClose }: { dev: Development; onClose: () => v
 }
 
 // ── Listing panel ───────────────────────────────────────────────────────────
-function ListingPanel({ listing: l, onClose }: { listing: Listing; onClose: () => void }) {
+function ListingPanel({ listing: l, watched, onWatch, onClose }: { listing: Listing; watched: boolean; onWatch: () => void; onClose: () => void }) {
   const opp = listingOpportunity(l);
   const deal = opp.atPrice?.isDeal;
   const priceData = l.priceHistory.map((p) => ({ label: p.date.slice(0, 7), price: p.price, event: p.event }));
@@ -634,6 +797,8 @@ function ListingPanel({ listing: l, onClose }: { listing: Listing; onClose: () =
           {deal ? <Badge variant="gold">Deal · {fmtPct(opp.atPrice!.margin)}</Badge> : <Badge variant="secondary">{fmtPct(opp.atPrice?.margin ?? 0)} margin</Badge>}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">{l.address} · {l.city}, {l.state}</p>
+
+        <ShareWatchRow id={l.id} watched={watched} onWatch={onWatch} />
 
         <StreetWalk lat={l.lat} lng={l.lng} />
 
