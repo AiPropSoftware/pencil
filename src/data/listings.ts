@@ -59,6 +59,10 @@ function isoMinusMonths(months: number): string {
 const STREETS = [
   "Palmetto", "Ashwood", "Grand", "Sunset", "Bayshore", "Meridian", "Laurel",
   "Ivy", "Douglas", "Coral", "Crescent", "Monarch", "Willow", "Ember", "Sage",
+  "Alder", "Brook", "Canyon", "Dover", "Everly", "Foster", "Gable", "Holloway",
+  "Inglewood", "Juno", "Kestrel", "Linden", "Marlow", "Newbury", "Oakmont",
+  "Preston", "Quarry", "Rosewood", "Stanton", "Thornbury", "Underwood", "Vernon",
+  "Whitfield", "Yale", "Zephyr", "Amherst", "Beckett", "Colby", "Denton",
 ];
 
 function buildableFor(kind: ListingKind, lotSqft: number): { type: ProductType; sqft: number } {
@@ -76,19 +80,19 @@ export const listings: Listing[] = (() => {
   cities.forEach((city, ci) => {
     const m = METRO_CENTERS[city];
     const tier = m.ppsf >= 600 ? 1.6 : m.ppsf >= 450 ? 1.25 : 1.0;
-    for (let i = 0; i < 6; i++) {
-      const kind = LISTING_KINDS[(ci + i) % LISTING_KINDS.length];
+    for (let i = 0; i < 52; i++) {
+      const kind = LISTING_KINDS[(ci * 2 + i) % LISTING_KINDS.length];
       const h = hash(`${city}-${i}`);
-      const lotSqft = 4500 + (h % 8) * 900;
+      const lotSqft = 4000 + (h % 14) * 850;
       const built = buildableFor(kind, lotSqft);
       const base =
         kind === "Vacant land" ? 190_000 :
         kind === "Teardown" ? 340_000 :
         kind === "SFH resale" ? 430_000 :
         620_000;
-      const listPrice = Math.round((base * tier) / 1000) * 1000;
-      const angle = ci * 1.9 + i * 2.3;
-      const ring = 0.05 + (i % 3) * 0.035;
+      const listPrice = Math.round((base * tier * (0.72 + (h % 14) * 0.045)) / 1000) * 1000;
+      const angle = ci * 1.9 + i * 0.61;
+      const ring = 0.015 + ((i * 5) % 10) * 0.02;
       const lat = +(m.lat + Math.sin(angle) * ring).toFixed(4);
       const lng = +(m.lng + Math.cos(angle) * ring * 1.25).toFixed(4);
       const dom = 5 + (h % 120);

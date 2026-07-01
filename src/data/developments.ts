@@ -335,10 +335,15 @@ function generateExtra(): Development[] {
   const STREETS = [
     "Magnolia", "Oakwood", "Cedar", "Birch", "Harborview", "Sunset", "Maple",
     "Ridgeline", "Lincoln", "Pearl", "Vista", "Juniper", "Highland", "Lakeshore", "Cypress",
+    "Aspen", "Bluebird", "Chestnut", "Dogwood", "Elm", "Fairview", "Garnet", "Hawthorn",
+    "Ironwood", "Jasmine", "Kingsley", "Larkspur", "Mulberry", "Nolan", "Orchard", "Poplar",
+    "Quincy", "Redbud", "Sycamore", "Tamarack", "Union", "Verbena", "Wren", "Yarrow",
   ];
   const DEVS = [
     "Summit Build Group", "Anchor Residential", "Northstar Homes", "Keystone Developments",
     "Vanguard Build Co.", "Outpost Homes", "Trailhead Build", "Beacon Residential",
+    "Ironclad Builders", "Harborline Homes", "Copper Ridge Dev", "Granite Peak Build",
+    "Silverline Residential", "Maplewood Build Co.", "Redstone Homes", "Cornerstone Vertical",
   ];
   const UNITS_BY_TYPE: Record<ProductType, number> = {
     SFH: 1, Infill: 1, Duplex: 2, Fourplex: 4, Townhomes: 6, "Small multi": 6,
@@ -353,15 +358,15 @@ function generateExtra(): Development[] {
     const m = METRO_CENTERS[city];
     const tierMult = m.ppsf >= 600 ? 1.5 : m.ppsf >= 450 ? 1.25 : 1.0;
     const buildPpsf = Math.round(180 + (m.ppsf >= 600 ? 60 : m.ppsf >= 450 ? 30 : 0));
-    for (let i = 0; i < 9; i++) {
-      const type = PRODUCT_TYPES[(ci + i) % PRODUCT_TYPES.length];
+    for (let i = 0; i < 55; i++) {
+      const type = PRODUCT_TYPES[(ci * 3 + i) % PRODUCT_TYPES.length];
       const status = STATUSES[(i + ci) % STATUSES.length];
-      const units = UNITS_BY_TYPE[type] + (type === "Townhomes" || type === "Small multi" ? i % 3 : 0);
+      const units = UNITS_BY_TYPE[type] + (type === "Townhomes" || type === "Small multi" ? i % 4 : 0);
       const buildingSqft = units * SQFT_PER_UNIT[type];
       const landSqft = Math.round(buildingSqft * 1.3);
-      const estValue = Math.round((units * 260_000 * tierMult) / 1000) * 1000;
-      const angle = ci * 2.4 + i * 1.7;
-      const ring = 0.04 + (i % 3) * 0.03;
+      const estValue = Math.round((units * 260_000 * tierMult * (0.85 + ((i * 7) % 11) * 0.03)) / 1000) * 1000;
+      const angle = ci * 2.4 + i * 0.77;
+      const ring = 0.015 + ((i * 3) % 9) * 0.018;
       const lat = +(m.lat + Math.sin(angle) * ring).toFixed(4);
       const lng = +(m.lng + Math.cos(angle) * ring * 1.3).toFixed(4);
       out.push({
