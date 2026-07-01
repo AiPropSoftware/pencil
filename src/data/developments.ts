@@ -466,9 +466,11 @@ function generateExtra(): Development[] {
       const landSqft = Math.round(buildingSqft * 1.3);
       const estValue = Math.round((units * 260_000 * tierMult * (0.85 + ((i * 7) % 11) * 0.03)) / 1000) * 1000;
       const angle = ci * 2.4 + i * 0.77;
-      const ring = 0.015 + ((i * 3) % 9) * 0.018;
+      const ring = 0.006 + ((i * 3) % 9) * 0.006;          // ~0.4–2.9 mi, tight
+      const inland = m.lng < -98 ? 1 : -1;                 // push toward US interior
+      const rawLng = Math.cos(angle) * ring;
       const lat = +(m.lat + Math.sin(angle) * ring).toFixed(4);
-      const lng = +(m.lng + Math.cos(angle) * ring * 1.3).toFixed(4);
+      const lng = +(m.lng + (Math.sign(rawLng) === inland ? rawLng : rawLng * -0.4)).toFixed(4);
       out.push({
         id: `gen-${ci}-${i}`,
         name: `${STREETS[(ci + i) % STREETS.length]} ${type}`,

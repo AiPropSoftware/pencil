@@ -39,7 +39,7 @@
     --gold-foreground: 25 22% 12%;
     --gold-muted: 38 45% 88%;
 
-    --radius: 0.5rem;
+    --radius: 0.4rem;
   }
 
   .dark {
@@ -73,6 +73,7 @@
     @apply border-border;
   }
   html {
+    font-size: 15px; /* denser, more professional base scale */
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
@@ -83,19 +84,6 @@
   }
   h1, h2, h3, h4 {
     @apply font-display font-semibold tracking-tight;
-  }
-  /* Subtle paper grain */
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    opacity: 0.4;
-    background-image:
-      radial-gradient(hsl(var(--foreground) / 0.025) 1px, transparent 1px);
-    background-size: 22px 22px;
-    mix-blend-mode: multiply;
   }
   #root {
     position: relative;

@@ -92,9 +92,11 @@ export const listings: Listing[] = (() => {
         620_000;
       const listPrice = Math.round((base * tier * (0.72 + (h % 14) * 0.045)) / 1000) * 1000;
       const angle = ci * 1.9 + i * 0.61;
-      const ring = 0.015 + ((i * 5) % 10) * 0.02;
+      const ring = 0.006 + ((i * 3) % 9) * 0.005;          // ~0.4–2.5 mi, tight
+      const inland = m.lng < -98 ? 1 : -1;                 // push toward US interior
+      const rawLng = Math.cos(angle) * ring;
       const lat = +(m.lat + Math.sin(angle) * ring).toFixed(4);
-      const lng = +(m.lng + Math.cos(angle) * ring * 1.25).toFixed(4);
+      const lng = +(m.lng + (Math.sign(rawLng) === inland ? rawLng : rawLng * -0.4)).toFixed(4);
       const dom = 5 + (h % 120);
       const existing = kind === "Vacant land" ? 0 : 900 + (h % 20) * 90;
 
