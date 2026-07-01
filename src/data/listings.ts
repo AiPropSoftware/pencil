@@ -80,7 +80,7 @@ export const listings: Listing[] = (() => {
   cities.forEach((city, ci) => {
     const m = METRO_CENTERS[city];
     const tier = m.ppsf >= 600 ? 1.6 : m.ppsf >= 450 ? 1.25 : 1.0;
-    for (let i = 0; i < 52; i++) {
+    for (let i = 0; i < 14; i++) {
       const kind = LISTING_KINDS[(ci * 2 + i) % LISTING_KINDS.length];
       const h = hash(`${city}-${i}`);
       const lotSqft = 4000 + (h % 14) * 850;

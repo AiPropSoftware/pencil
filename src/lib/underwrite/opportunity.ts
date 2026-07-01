@@ -10,7 +10,7 @@
  * Build costs are a curated regional baseline (tunable, and replaceable with
  * real GC bids later). Everything is transparent so the user can override.
  */
-import type { ProductType } from "@/data/developments";
+import { METRO_CENTERS, type ProductType } from "@/data/developments";
 
 /** Baseline single-family build cost ($/sqft) by metro. Tune with real bids. */
 const BUILD_SFH_PPSF: Record<string, number> = {
@@ -31,7 +31,10 @@ export function targetMarginFor(type: ProductType): number {
 }
 
 export function buildPpsf(city: string, type: ProductType): number {
-  const base = BUILD_SFH_PPSF[city] ?? 220;
+  // Known cities use the curated baseline; the rest derive a plausible build
+  // cost from their sale $/sqft (≈ half of sale, bounded), so every metro varies.
+  const derived = Math.round(Math.min(400, Math.max(180, (METRO_CENTERS[city]?.ppsf ?? 350) * 0.5)));
+  const base = BUILD_SFH_PPSF[city] ?? derived;
   return Math.round(base * (TYPE_BUILD_FACTOR[type] ?? 1));
 }
 
