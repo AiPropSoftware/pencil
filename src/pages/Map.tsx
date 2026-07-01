@@ -19,9 +19,11 @@ import {
   type Development, type ProductType, type DevStatus,
 } from "@/data/developments";
 import { fetchCityDevelopments, AUSTIN } from "@/providers/permits/socrata";
+import { scoreOpportunity } from "@/lib/underwrite/opportunity";
+import { fmtPct } from "@/lib/format";
 import {
   Search, X, ArrowRight, Building2, CalendarDays, Ruler, Layers3,
-  TrendingUp, ExternalLink, HardHat, PencilRuler, Plus,
+  TrendingUp, ExternalLink, HardHat, PencilRuler, Plus, Sparkles, Globe,
 } from "lucide-react";
 
 const US_CENTER: [number, number] = [39.5, -98.35];
@@ -371,6 +373,13 @@ function DevelopmentDrawer({ dev, onClose }: { dev: Development; onClose: () => 
   const architect = architectFor(dev);
   const ppsf = ppsfSummary(dev.city);
   const trend = metroTrend(dev.city);
+  const opp = scoreOpportunity({
+    city: dev.city,
+    type: dev.productType,
+    buildableSqft: dev.buildingSqft,
+    areaPpsf: ppsf.current,
+  });
+  const builderSearch = `https://www.google.com/search?q=${encodeURIComponent(`${dev.developer} ${dev.city} ${dev.state} home builder`)}`;
   const comps = developments
     .filter((d) => d.city === dev.city && d.id !== dev.id)
     .slice(0, 4)
@@ -416,6 +425,26 @@ function DevelopmentDrawer({ dev, onClose }: { dev: Development; onClose: () => 
             <Metric icon={Layers3} label="Stories" value={fmtNumber(dev.stories)} />
             <Metric icon={Ruler} label="Land" value={`${fmtNumber(dev.landSqft)} sf`} />
             <Metric icon={Ruler} label="Building" value={`${fmtNumber(dev.buildingSqft)} sf`} />
+          </div>
+
+          {/* Deal X-ray — the developer's genius overlay */}
+          <div className="mt-6 rounded-md border border-gold/40 bg-gold-muted/30 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="stat-label flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-gold" /> Deal X-ray</div>
+              <Badge variant="gold">{fmtPct(opp.targetMargin)} target margin</Badge>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Metric icon={Ruler} label="Est. build cost" value={`$${opp.buildPpsf}/sf`} />
+              <Metric icon={TrendingUp} label="Sells at area rate" value={fmtMoney(opp.arv)} accent />
+            </div>
+            <div className="mt-3 rounded-md border border-border bg-card p-3">
+              <div className="stat-label">Max land offer to hit {fmtPct(opp.targetMargin)}</div>
+              <div className="font-display text-2xl text-gold">{fmtMoney(opp.maxLandPrice)}</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Pay at or below this for the lot and the deal works. Build ≈ {fmtMoney(opp.buildCost)},
+                sells ≈ {fmtMoney(opp.arv)} at {dev.city} rates.
+              </p>
+            </div>
           </div>
 
           {/* Market $/sqft confidence */}
@@ -473,9 +502,14 @@ function DevelopmentDrawer({ dev, onClose }: { dev: Development; onClose: () => 
             )}
           </Section>
 
-          {/* Project team */}
+          {/* Project team — one click to reach the builder */}
           <Section title="Project team" tag="permit record">
-            <Row label={<span className="inline-flex items-center gap-1.5"><HardHat className="h-3.5 w-3.5" /> Developer / GC</span>} value={dev.developer} />
+            <div className="flex items-center justify-between text-sm py-1">
+              <span className="text-muted-foreground inline-flex items-center gap-1.5"><HardHat className="h-3.5 w-3.5" /> Developer / GC</span>
+              <a href={builderSearch} target="_blank" rel="noreferrer" className="font-medium text-gold hover:underline inline-flex items-center gap-1">
+                {dev.developer} <Globe className="h-3 w-3" />
+              </a>
+            </div>
             <Row label={<span className="inline-flex items-center gap-1.5"><PencilRuler className="h-3.5 w-3.5" /> Architect</span>} value={architect} />
           </Section>
 
