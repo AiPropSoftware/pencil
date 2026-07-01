@@ -61,7 +61,14 @@ export const AUSTIN: CitySource = {
   metroPpsf: 470,
 };
 
-export async function fetchCityDevelopments(src: CitySource, limit = 400): Promise<Development[]> {
+export interface CityResult {
+  items: Development[];
+  total: number;      // raw rows fetched from the city
+  columns: string[];  // the city's actual field names (for on-screen tuning)
+  error?: string;
+}
+
+export async function fetchCityDevelopments(src: CitySource, limit = 400): Promise<CityResult> {
   const params = new URLSearchParams();
   params.set("$where", "latitude IS NOT NULL");
   params.set("$order", "issued_date DESC");
@@ -69,14 +76,19 @@ export async function fetchCityDevelopments(src: CitySource, limit = 400): Promi
   const token = import.meta.env.VITE_SOCRATA_APP_TOKEN as string | undefined;
   if (token) params.set("$$app_token", token);
 
-  const res = await fetch(`${src.url}?${params.toString()}`, { headers: { Accept: "application/json" } });
-  if (!res.ok) throw new Error(`Socrata ${src.city} ${res.status}`);
-  const rows = (await res.json()) as Record<string, unknown>[];
+  let rows: Record<string, unknown>[] = [];
+  try {
+    const res = await fetch(`${src.url}?${params.toString()}`, { headers: { Accept: "application/json" } });
+    if (!res.ok) return { items: [], total: 0, columns: [], error: `HTTP ${res.status} from ${src.city} open-data` };
+    rows = (await res.json()) as Record<string, unknown>[];
+  } catch (e) {
+    return { items: [], total: 0, columns: [], error: (e as Error).message };
+  }
 
-  if (rows.length > 0) {
-    // One-time diagnostic so we can tune field mapping to the real schema.
+  const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+  if (columns.length) {
     // eslint-disable-next-line no-console
-    console.info(`[Pencil] ${src.city} permit columns:`, Object.keys(rows[0]).join(", "));
+    console.info(`[Pencil] ${src.city} permit columns:`, columns.join(", "));
   }
 
   const seen = new Set<string>();
@@ -137,5 +149,5 @@ export async function fetchCityDevelopments(src: CitySource, limit = 400): Promi
     });
   }
 
-  return out.slice(0, 300);
+  return { items: out.slice(0, 300), total: rows.length, columns };
 }

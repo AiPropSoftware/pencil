@@ -19,7 +19,7 @@ import {
   type Development, type ProductType,
 } from "@/data/developments";
 import { listings, LISTING_KINDS, LISTING_COLOR, type Listing, type ListingKind } from "@/data/listings";
-import { fetchCityDevelopments, AUSTIN } from "@/providers/permits/socrata";
+import { fetchCityDevelopments, AUSTIN, type CityResult } from "@/providers/permits/socrata";
 import { scoreOpportunity, buildPpsf, targetMarginFor } from "@/lib/underwrite/opportunity";
 import {
   Search, X, ArrowRight, Building2, CalendarDays, Ruler, Layers3, TrendingUp,
@@ -162,16 +162,18 @@ export default function MapPage() {
   const [selected, setSelected] = React.useState<Selection>(null);
   const [dealsOnly, setDealsOnly] = React.useState(false);
 
-  const [liveAustin, setLiveAustin] = React.useState<Development[] | null>(null);
-  const [liveStatus, setLiveStatus] = React.useState<"loading" | "live" | "demo">("loading");
+  const [liveResult, setLiveResult] = React.useState<CityResult | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
     fetchCityDevelopments(AUSTIN)
-      .then((rows) => { if (!cancelled) { if (rows.length) { setLiveAustin(rows); setLiveStatus("live"); } else setLiveStatus("demo"); } })
-      .catch(() => { if (!cancelled) setLiveStatus("demo"); });
+      .then((r) => { if (!cancelled) setLiveResult(r); })
+      .catch((e) => { if (!cancelled) setLiveResult({ items: [], total: 0, columns: [], error: String(e) }); });
     return () => { cancelled = true; };
   }, []);
+
+  const liveAustin = liveResult && liveResult.items.length > 0 ? liveResult.items : null;
+  const liveStatus: "loading" | "live" | "demo" = !liveResult ? "loading" : liveAustin ? "live" : "demo";
 
   React.useEffect(() => { setVisibleCount(PAGE); }, [place, layer, typeFilter, kindFilter, dealsOnly]);
 
@@ -246,9 +248,7 @@ export default function MapPage() {
               <Sparkles className="h-4 w-4 text-gold" /> Deals only
             </button>
           )}
-          <div className="hidden xl:flex items-center gap-2 text-xs text-muted-foreground">
-            {liveStatus === "live" ? <Badge variant="gold">● Austin live ({liveAustin?.length})</Badge> : <span>Austin: {liveStatus === "loading" ? "loading…" : "demo"}</span>}
-          </div>
+          <LiveStatusChip result={liveResult} status={liveStatus} count={liveAustin?.length ?? 0} />
         </div>
         {/* Filter chips */}
         <div className="container pb-3 flex flex-wrap gap-1.5">
@@ -322,6 +322,39 @@ export default function MapPage() {
 
 function toggleSet<T>(setter: React.Dispatch<React.SetStateAction<Set<T>>>, v: T) {
   setter((prev) => { const n = new Set(prev); n.has(v) ? n.delete(v) : n.add(v); return n; });
+}
+
+function LiveStatusChip({ result, status, count }: { result: CityResult | null; status: "loading" | "live" | "demo"; count: number }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-2 text-xs text-muted-foreground hover:text-foreground"
+      >
+        <span className={`h-2 w-2 rounded-full ${status === "live" ? "bg-gold" : status === "loading" ? "bg-muted-foreground/50" : "bg-destructive/60"}`} />
+        {status === "live" ? `Austin live · ${count} real permits` : status === "loading" ? "Checking Austin feed…" : "Austin feed: no data"}
+        <span className="text-muted-foreground/60">ⓘ</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 z-[3000] mt-2 w-80 rounded-md border border-border bg-card p-3 shadow-elevated text-xs">
+          <div className="font-medium text-foreground mb-1">Austin open-data permit feed</div>
+          <div className="text-muted-foreground">Rows fetched: <span className="text-foreground">{result?.total ?? "…"}</span> · usable: <span className="text-foreground">{count}</span></div>
+          {result?.error && <div className="mt-1 text-destructive">Error: {result.error}</div>}
+          {result && result.columns.length > 0 && (
+            <div className="mt-2">
+              <div className="text-muted-foreground mb-1">Columns the city returned:</div>
+              <div className="max-h-40 overflow-y-auto rounded bg-secondary/50 p-2 text-[11px] text-foreground/90 break-words">{result.columns.join(", ")}</div>
+              <p className="mt-2 text-muted-foreground">Screenshot this and send it — I’ll map these fields exactly and expand to more cities.</p>
+            </div>
+          )}
+          {result && result.total === 0 && !result.error && (
+            <p className="mt-2 text-muted-foreground">The city returned 0 rows — likely a blocked request or changed dataset. Send me a screenshot.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ToggleBtn({ active, onClick, icon: Icon, children }: { active: boolean; onClick: () => void; icon: React.ComponentType<{ className?: string }>; children: React.ReactNode }) {
