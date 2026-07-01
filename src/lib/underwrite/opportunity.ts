@@ -42,6 +42,7 @@ export interface OpportunityInput {
   areaPpsf: number;        // sale $/sqft for finished product in the area
   landPrice?: number;      // known list/ask price, if any
   targetMargin?: number;
+  buildPpsfOverride?: number; // let the user override the regional estimate
 }
 
 export interface Opportunity {
@@ -68,7 +69,7 @@ const FINANCING_PCT = 0.06; // % of build (fees + carry proxy)
 const SELLING_PCT = 0.06;   // commission + sale closing
 
 export function scoreOpportunity(i: OpportunityInput): Opportunity {
-  const bppsf = buildPpsf(i.city, i.type);
+  const bppsf = i.buildPpsfOverride ?? buildPpsf(i.city, i.type);
   const buildCost = bppsf * i.buildableSqft;
   const arv = Math.round(i.areaPpsf * i.buildableSqft);
   const financing = buildCost * FINANCING_PCT;

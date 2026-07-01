@@ -11,43 +11,53 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { fmtMoney, fmtNumber } from "@/lib/format";
+import { NumericField } from "@/components/MoneyInput";
+import { fmtMoney, fmtNumber, fmtPct } from "@/lib/format";
 import {
-  developments, summarize, metroTrend, ppsfSummary, listingInfo, permitTimeline, architectFor,
-  imageFor, imageFallback,
-  PRODUCT_TYPES, STATUSES, TYPE_COLOR,
-  type Development, type ProductType, type DevStatus,
+  developments, metroTrend, ppsfSummary, listingInfo, permitTimeline, architectFor,
+  imageFor, imageFallback, PRODUCT_TYPES, TYPE_COLOR,
+  type Development, type ProductType,
 } from "@/data/developments";
+import { listings, LISTING_KINDS, LISTING_COLOR, type Listing, type ListingKind } from "@/data/listings";
 import { fetchCityDevelopments, AUSTIN } from "@/providers/permits/socrata";
-import { scoreOpportunity } from "@/lib/underwrite/opportunity";
-import { fmtPct } from "@/lib/format";
+import { scoreOpportunity, buildPpsf, targetMarginFor } from "@/lib/underwrite/opportunity";
 import {
-  Search, X, ArrowRight, Building2, CalendarDays, Ruler, Layers3,
-  TrendingUp, ExternalLink, HardHat, PencilRuler, Plus, Sparkles, Globe,
+  Search, X, ArrowRight, Building2, CalendarDays, Ruler, Layers3, TrendingUp,
+  ExternalLink, HardHat, PencilRuler, Plus, Sparkles, Globe, Home, Hammer,
 } from "lucide-react";
 
 const US_CENTER: [number, number] = [39.5, -98.35];
 const US_ZOOM = 4.4;
-const PAGE = 12; // initial pins; "Show 20 more" grows this
-
-// Optional — embeds an interactive Street View panorama in the drawer when set.
+const PAGE = 14;
 const GOOGLE_MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY as string | undefined;
 
-/** Fit the map to the searched area; fly to a single result. */
-function FitOnPlace({ place, points }: { place: string; points: Development[] }) {
+type Layer = "construction" | "listings";
+type Selection =
+  | { kind: "dev"; data: Development }
+  | { kind: "listing"; data: Listing }
+  | null;
+
+interface Pin {
+  id: string;
+  lat: number;
+  lng: number;
+  color: string;
+  deal: boolean;
+  selected: boolean;
+  label: string;
+  onClick: () => void;
+}
+
+// ── Map helpers ─────────────────────────────────────────────────────────────
+function FitOnPlace({ place, points }: { place: string; points: { lat: number; lng: number }[] }) {
   const map = useMap();
   const ref = React.useRef(points);
   ref.current = points;
   React.useEffect(() => {
     const pts = ref.current;
-    if (!place || pts.length === 0) {
-      if (!place) map.flyTo(US_CENTER, US_ZOOM, { duration: 0.6 });
-      return;
-    }
-    if (pts.length === 1) {
-      map.flyTo([pts[0].lat, pts[0].lng], 12, { duration: 0.8 });
-      return;
-    }
+    if (!place) { map.flyTo(US_CENTER, US_ZOOM, { duration: 0.6 }); return; }
+    if (pts.length === 0) return;
+    if (pts.length === 1) { map.flyTo([pts[0].lat, pts[0].lng], 12, { duration: 0.8 }); return; }
     let minLat = Infinity, minLng = Infinity, maxLat = -Infinity, maxLng = -Infinity;
     for (const p of pts) {
       minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat);
@@ -59,57 +69,41 @@ function FitOnPlace({ place, points }: { place: string; points: Development[] })
   return null;
 }
 
-/** Viewport-aware clustering via supercluster — scales to thousands of pins. */
-function Clusters({
-  points, selectedId, onSelect,
-}: { points: Development[]; selectedId: string | null; onSelect: (d: Development) => void }) {
+function Clusters({ pins }: { pins: Pin[] }) {
   const [view, setView] = React.useState<{ bbox: [number, number, number, number]; zoom: number } | null>(null);
-
-  const map = useMapEvents({
-    moveend: () => syncView(),
-    zoomend: () => syncView(),
-  });
-
-  function syncView() {
+  const map = useMapEvents({ moveend: () => sync(), zoomend: () => sync() });
+  function sync() {
     const b = map.getBounds();
     setView({ bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], zoom: map.getZoom() });
   }
-
-  React.useEffect(() => { syncView(); /* initial */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { sync(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const byId = React.useMemo(() => {
-    const m = new Map<string, Development>();
-    points.forEach((p) => m.set(p.id, p));
+    const m = new Map<string, Pin>();
+    pins.forEach((p) => m.set(p.id, p));
     return m;
-  }, [points]);
+  }, [pins]);
 
   const index = React.useMemo(() => {
-    const sc = new Supercluster<{ devId: string }>({ radius: 58, maxZoom: 15 });
-    sc.load(
-      points.map((p) => ({
-        type: "Feature" as const,
-        properties: { devId: p.id },
-        geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
-      })),
-    );
+    const sc = new Supercluster<{ pid: string }>({ radius: 58, maxZoom: 15 });
+    sc.load(pins.map((p) => ({
+      type: "Feature" as const,
+      properties: { pid: p.id },
+      geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
+    })));
     return sc;
-  }, [points]);
+  }, [pins]);
 
   const clusters = React.useMemo(() => {
     if (!view) return [];
-    try {
-      return index.getClusters(view.bbox, Math.floor(view.zoom));
-    } catch {
-      return [];
-    }
+    try { return index.getClusters(view.bbox, Math.floor(view.zoom)); } catch { return []; }
   }, [index, view]);
 
   return (
     <>
       {clusters.map((c) => {
         const [lng, lat] = c.geometry.coordinates;
-        const props = c.properties as { cluster?: boolean; point_count?: number; devId?: string };
-
+        const props = c.properties as { cluster?: boolean; point_count?: number; pid?: string };
         if (props.cluster) {
           const count = props.point_count ?? 0;
           const size = Math.round(32 + Math.min(30, Math.log2(count + 1) * 8));
@@ -119,34 +113,27 @@ function Clusters({
             html: `<div style="width:${size}px;height:${size}px;border-radius:9999px;display:flex;align-items:center;justify-content:center;background:rgba(200,165,92,0.92);color:#1a1612;font-weight:600;font-size:12px;border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.25)">${count}</div>`,
           });
           return (
-            <Marker
-              key={`cluster-${c.id}`}
-              position={[lat, lng]}
-              icon={icon}
-              eventHandlers={{
-                click: () => {
-                  const z = Math.min(index.getClusterExpansionZoom(c.id as number), 16);
-                  map.flyTo([lat, lng], z, { duration: 0.6 });
-                },
-              }}
-            />
+            <Marker key={`c-${c.id}`} position={[lat, lng]} icon={icon} eventHandlers={{
+              click: () => map.flyTo([lat, lng], Math.min(index.getClusterExpansionZoom(c.id as number), 16), { duration: 0.6 }),
+            }} />
           );
         }
-
-        const dev = byId.get(props.devId as string);
-        if (!dev) return null;
-        const isSel = selectedId === dev.id;
+        const pin = byId.get(props.pid as string);
+        if (!pin) return null;
         return (
           <CircleMarker
-            key={dev.id}
+            key={pin.id}
             center={[lat, lng]}
-            radius={isSel ? 11 : 7}
-            pathOptions={{ color: "#fff", weight: 2, fillColor: TYPE_COLOR[dev.productType], fillOpacity: isSel ? 1 : 0.85 }}
-            eventHandlers={{ click: () => onSelect(dev) }}
+            radius={pin.selected ? 11 : 7}
+            pathOptions={{
+              color: pin.deal ? "#c8a55c" : "#fff",
+              weight: pin.deal ? 3 : 2,
+              fillColor: pin.color,
+              fillOpacity: pin.selected ? 1 : 0.85,
+            }}
+            eventHandlers={{ click: pin.onClick }}
           >
-            <Tooltip direction="top" offset={[0, -6]}>
-              <span className="text-xs"><strong>{dev.name}</strong> · {dev.productType} · {dev.units} {dev.units === 1 ? "unit" : "units"}</span>
-            </Tooltip>
+            <Tooltip direction="top" offset={[0, -6]}><span className="text-xs">{pin.label}</span></Tooltip>
           </CircleMarker>
         );
       })}
@@ -154,452 +141,240 @@ function Clusters({
   );
 }
 
-export default function MapPage() {
-  const [types, setTypes] = React.useState<Set<ProductType>>(new Set(PRODUCT_TYPES));
-  const [statuses, setStatuses] = React.useState<Set<DevStatus>>(new Set(STATUSES));
-  const [place, setPlace] = React.useState("");
-  const [visibleCount, setVisibleCount] = React.useState(PAGE);
-  const [selected, setSelected] = React.useState<Development | null>(null);
+// ── X-ray computation shared by cards + panels ──────────────────────────────
+function devOpportunity(d: Development) {
+  return scoreOpportunity({ city: d.city, type: d.productType, buildableSqft: d.buildingSqft, areaPpsf: ppsfSummary(d.city).current });
+}
+function listingOpportunity(l: Listing) {
+  return scoreOpportunity({
+    city: l.city, type: l.productTypeIfBuilt, buildableSqft: l.buildableSqft,
+    areaPpsf: ppsfSummary(l.city).current, landPrice: l.listPrice,
+  });
+}
 
-  // Live city permits ("our own Shovels"). Austin first; falls back to demo.
+// ── Main single-surface app ─────────────────────────────────────────────────
+export default function MapPage() {
+  const [layer, setLayer] = React.useState<Layer>("construction");
+  const [place, setPlace] = React.useState("");
+  const [typeFilter, setTypeFilter] = React.useState<Set<ProductType>>(new Set(PRODUCT_TYPES));
+  const [kindFilter, setKindFilter] = React.useState<Set<ListingKind>>(new Set(LISTING_KINDS));
+  const [visibleCount, setVisibleCount] = React.useState(PAGE);
+  const [selected, setSelected] = React.useState<Selection>(null);
+  const [dealsOnly, setDealsOnly] = React.useState(false);
+
   const [liveAustin, setLiveAustin] = React.useState<Development[] | null>(null);
   const [liveStatus, setLiveStatus] = React.useState<"loading" | "live" | "demo">("loading");
 
   React.useEffect(() => {
     let cancelled = false;
     fetchCityDevelopments(AUSTIN)
-      .then((rows) => {
-        if (cancelled) return;
-        if (rows.length > 0) { setLiveAustin(rows); setLiveStatus("live"); }
-        else setLiveStatus("demo");
-      })
-      .catch((e) => { console.warn("[Pencil] live Austin permits unavailable:", e); if (!cancelled) setLiveStatus("demo"); });
+      .then((rows) => { if (!cancelled) { if (rows.length) { setLiveAustin(rows); setLiveStatus("live"); } else setLiveStatus("demo"); } })
+      .catch(() => { if (!cancelled) setLiveStatus("demo"); });
     return () => { cancelled = true; };
   }, []);
 
-  // Swap demo Austin for live permits when available; other metros stay demo.
-  const allDevelopments = React.useMemo(() => {
+  React.useEffect(() => { setVisibleCount(PAGE); }, [place, layer, typeFilter, kindFilter, dealsOnly]);
+
+  const allDevs = React.useMemo(() => {
     if (!liveAustin) return developments;
     return [...developments.filter((d) => d.city !== "Austin"), ...liveAustin];
   }, [liveAustin]);
 
-  // Reset pagination whenever the search/filters change.
-  React.useEffect(() => { setVisibleCount(PAGE); }, [place, types, statuses]);
+  const matchesPlace = (s: string) => place.trim() === "" || s.toLowerCase().includes(place.trim().toLowerCase());
 
-  const matches = React.useMemo(
-    () =>
-      allDevelopments.filter(
-        (d) =>
-          types.has(d.productType) &&
-          statuses.has(d.status) &&
-          (place.trim() === "" ||
-            `${d.name} ${d.developer} ${d.city} ${d.state}`.toLowerCase().includes(place.trim().toLowerCase())),
-      ),
-    [allDevelopments, types, statuses, place],
+  const devMatches = React.useMemo(
+    () => allDevs.filter((d) => typeFilter.has(d.productType) && matchesPlace(`${d.name} ${d.developer} ${d.city} ${d.state}`)),
+    [allDevs, typeFilter, place],
+  );
+  const listingMatches = React.useMemo(
+    () => listings.filter((l) => kindFilter.has(l.kind) && matchesPlace(`${l.address} ${l.city} ${l.state} ${l.kind}`)
+      && (!dealsOnly || listingOpportunity(l).atPrice?.isDeal)),
+    [kindFilter, place, dealsOnly],
   );
 
-  const visible = matches.slice(0, visibleCount);
-  const stats = summarize(matches);
-  const hasMore = visibleCount < matches.length;
+  const activeList = layer === "construction" ? devMatches : listingMatches;
+  const visible = activeList.slice(0, visibleCount);
+  const hasMore = visibleCount < activeList.length;
 
-  const toggleType = (t: ProductType) =>
-    setTypes((p) => { const n = new Set(p); n.has(t) ? n.delete(t) : n.add(t); return n; });
-  const toggleStatus = (s: DevStatus) =>
-    setStatuses((p) => { const n = new Set(p); n.has(s) ? n.delete(s) : n.add(s); return n; });
+  const pins: Pin[] = React.useMemo(() => {
+    if (layer === "construction") {
+      return devMatches.map((d) => ({
+        id: d.id, lat: d.lat, lng: d.lng, color: TYPE_COLOR[d.productType], deal: false,
+        selected: selected?.kind === "dev" && selected.data.id === d.id,
+        label: `${d.name} · ${d.productType}`,
+        onClick: () => setSelected({ kind: "dev", data: d }),
+      }));
+    }
+    return listingMatches.map((l) => ({
+      id: l.id, lat: l.lat, lng: l.lng, color: LISTING_COLOR[l.kind],
+      deal: !!listingOpportunity(l).atPrice?.isDeal,
+      selected: selected?.kind === "listing" && selected.data.id === l.id,
+      label: `${l.kind} · ${fmtMoney(l.listPrice)}`,
+      onClick: () => setSelected({ kind: "listing", data: l }),
+    }));
+  }, [layer, devMatches, listingMatches, selected]);
 
   return (
     <div className="flex flex-col">
-      <div className="container pt-8 pb-4">
-        <div className="gold-rule" />
-        <div className="mt-3 flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-          <div>
-            <h1 className="font-display text-4xl">Development Map</h1>
-            <p className="mt-1 text-muted-foreground max-w-xl">
-              A bird’s-eye and insider look at ground-up residential development
-              across the US. Search a city or state to focus, then drill into any
-              project for listing, sale, builder, and permit detail.
-            </p>
-            <div className="mt-2 inline-flex items-center gap-2 text-xs">
-              {liveStatus === "live" ? (
-                <Badge variant="gold">● Austin: live city permits ({liveAustin?.length ?? 0})</Badge>
-              ) : liveStatus === "loading" ? (
-                <span className="text-muted-foreground">Loading live Austin permits…</span>
-              ) : (
-                <span className="text-muted-foreground">Austin live feed unavailable — showing demo data</span>
-              )}
-              <span className="text-muted-foreground">· other metros: demo</span>
-            </div>
+      {/* Control bar */}
+      <div className="border-b border-border/60 bg-background/80 backdrop-blur">
+        <div className="container py-3 flex flex-col lg:flex-row lg:items-center gap-3">
+          <div className="flex items-center gap-1 rounded-md border border-border bg-secondary/40 p-1">
+            <ToggleBtn active={layer === "construction"} onClick={() => setLayer("construction")} icon={Hammer}>Construction</ToggleBtn>
+            <ToggleBtn active={layer === "listings"} onClick={() => setLayer("listings")} icon={Home}>Listings</ToggleBtn>
           </div>
-          <div className="flex gap-3">
-            <StatChip label="Projects" value={fmtNumber(stats.count)} />
-            <StatChip label="Units" value={fmtNumber(stats.totalUnits)} />
-            <StatChip label="Pipeline value" value={fmtMoney(stats.totalValue)} accent />
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input className="pl-9" placeholder="Search a city or state (e.g. Miami, FL)" value={place} onChange={(e) => setPlace(e.target.value)} />
+            {place && <button onClick={() => setPlace("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>}
           </div>
+          {layer === "listings" && (
+            <button
+              onClick={() => setDealsOnly((v) => !v)}
+              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm ${dealsOnly ? "border-gold bg-gold-muted text-foreground" : "border-border text-muted-foreground hover:text-foreground"}`}
+            >
+              <Sparkles className="h-4 w-4 text-gold" /> Deals only
+            </button>
+          )}
+          <div className="hidden xl:flex items-center gap-2 text-xs text-muted-foreground">
+            {liveStatus === "live" ? <Badge variant="gold">● Austin live ({liveAustin?.length})</Badge> : <span>Austin: {liveStatus === "loading" ? "loading…" : "demo"}</span>}
+          </div>
+        </div>
+        {/* Filter chips */}
+        <div className="container pb-3 flex flex-wrap gap-1.5">
+          {layer === "construction"
+            ? PRODUCT_TYPES.map((t) => (
+                <FilterPill key={t} active={typeFilter.has(t)} color={TYPE_COLOR[t]} onClick={() => toggleSet(setTypeFilter, t)}>{t}</FilterPill>
+              ))
+            : LISTING_KINDS.map((k) => (
+                <FilterPill key={k} active={kindFilter.has(k)} color={LISTING_COLOR[k]} onClick={() => toggleSet(setKindFilter, k)}>{k}</FilterPill>
+              ))}
         </div>
       </div>
 
-      <div className="container pb-10">
-        <div className="grid lg:grid-cols-[1fr_390px] gap-4">
-          <Card className="overflow-hidden p-0">
-            <div className="relative h-[640px] w-full">
-              <MapContainer center={US_CENTER} zoom={US_ZOOM} scrollWheelZoom className="h-full w-full" style={{ background: "#eae5db" }}>
-                <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                  url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                />
-                <FitOnPlace place={place} points={matches} />
-                <Clusters points={matches} selectedId={selected?.id ?? null} onSelect={setSelected} />
-              </MapContainer>
-
-              <div className="absolute bottom-3 left-3 z-[1000] rounded-md border border-border bg-card/95 backdrop-blur px-3 py-2 shadow-card">
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                  {PRODUCT_TYPES.map((t) => (
-                    <div key={t} className="flex items-center gap-1.5 text-[11px]">
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: TYPE_COLOR[t] }} />
-                      <span className="text-foreground/80">{t}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          <div className="space-y-4">
-            <Card>
-              <CardContent className="p-4 space-y-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    className="pl-9"
-                    placeholder="Search a city or state (e.g. Miami, FL)"
-                    value={place}
-                    onChange={(e) => setPlace(e.target.value)}
-                  />
-                  {place && (
-                    <button onClick={() => setPlace("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-                <div>
-                  <div className="stat-label mb-2">Product type</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {PRODUCT_TYPES.map((t) => (
-                      <FilterPill key={t} active={types.has(t)} onClick={() => toggleType(t)} color={TYPE_COLOR[t]}>{t}</FilterPill>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <div className="stat-label mb-2">Status</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {STATUSES.map((s) => (
-                      <FilterPill key={s} active={statuses.has(s)} onClick={() => toggleStatus(s)}>{s}</FilterPill>
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-              <span>Showing {visible.length} of {matches.length}{place ? ` in “${place}”` : " nationwide"}</span>
-              {!place && <span className="text-gold">Search a city to focus</span>}
-            </div>
-
-            <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
-              {visible.map((d) => (
-                <button
-                  key={d.id}
-                  onClick={() => setSelected(d)}
-                  className={`w-full text-left rounded-md border bg-card p-3 transition-colors hover:bg-secondary/60 ${
-                    selected?.id === d.id ? "border-gold ring-1 ring-gold/40" : "border-border"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium truncate">{d.name}</span>
-                    <span className="h-2.5 w-2.5 rounded-full flex-none" style={{ background: TYPE_COLOR[d.productType] }} />
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    {d.city}, {d.state} · {d.units} {d.units === 1 ? "unit" : "units"} · {fmtMoney(d.estValue)}
-                  </div>
-                </button>
-              ))}
-              {matches.length === 0 && (
-                <p className="text-sm text-muted-foreground py-8 text-center">No developments match. Try a different city or widen the filters.</p>
-              )}
-            </div>
-
+      {/* Rail + map */}
+      <div className="grid lg:grid-cols-[380px_1fr]">
+        {/* Listing rail */}
+        <div className="order-2 lg:order-1 border-r border-border/60 max-h-[calc(100vh-9rem)] overflow-y-auto">
+          <div className="p-3 text-xs text-muted-foreground flex items-center justify-between">
+            <span>{activeList.length} {layer === "construction" ? "projects" : "listings"}{place ? ` in “${place}”` : ""}</span>
+            {!place && <span className="text-gold">Search a city to focus</span>}
+          </div>
+          <div className="px-3 pb-3 space-y-2">
+            {visible.map((item) =>
+              layer === "construction"
+                ? <DevCard key={(item as Development).id} d={item as Development} selected={selected?.kind === "dev" && selected.data.id === (item as Development).id} onClick={() => setSelected({ kind: "dev", data: item as Development })} />
+                : <ListingCard key={(item as Listing).id} l={item as Listing} selected={selected?.kind === "listing" && selected.data.id === (item as Listing).id} onClick={() => setSelected({ kind: "listing", data: item as Listing })} />,
+            )}
+            {activeList.length === 0 && <p className="text-sm text-muted-foreground py-8 text-center">Nothing matches. Try another city or widen the filters.</p>}
             {hasMore && (
               <Button variant="outline" className="w-full" onClick={() => setVisibleCount((c) => c + 20)}>
-                <Plus className="h-4 w-4" /> Show 20 more ({matches.length - visibleCount} left)
+                <Plus className="h-4 w-4" /> Show 20 more ({activeList.length - visibleCount} left)
               </Button>
             )}
           </div>
         </div>
+
+        {/* Map */}
+        <div className="order-1 lg:order-2 relative h-[52vh] lg:h-[calc(100vh-9rem)]">
+          <MapContainer center={US_CENTER} zoom={US_ZOOM} scrollWheelZoom className="h-full w-full" style={{ background: "#eae5db" }}>
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+            />
+            <FitOnPlace place={place} points={activeList.map((p) => ({ lat: p.lat, lng: p.lng }))} />
+            <Clusters pins={pins} />
+          </MapContainer>
+          <div className="absolute bottom-3 left-3 z-[1000] rounded-md border border-border bg-card/95 backdrop-blur px-3 py-2 shadow-card">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+              {(layer === "construction" ? PRODUCT_TYPES : LISTING_KINDS).map((t) => (
+                <div key={t} className="flex items-center gap-1.5 text-[11px]">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: layer === "construction" ? TYPE_COLOR[t as ProductType] : LISTING_COLOR[t as keyof typeof LISTING_COLOR] }} />
+                  <span className="text-foreground/80">{t}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
 
-      {selected && <DevelopmentDrawer dev={selected} onClose={() => setSelected(null)} />}
+      {selected?.kind === "dev" && <DevelopmentPanel dev={selected.data} onClose={() => setSelected(null)} />}
+      {selected?.kind === "listing" && <ListingPanel listing={selected.data} onClose={() => setSelected(null)} />}
     </div>
   );
 }
 
-function StatChip({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function toggleSet<T>(setter: React.Dispatch<React.SetStateAction<Set<T>>>, v: T) {
+  setter((prev) => { const n = new Set(prev); n.has(v) ? n.delete(v) : n.add(v); return n; });
+}
+
+function ToggleBtn({ active, onClick, icon: Icon, children }: { active: boolean; onClick: () => void; icon: React.ComponentType<{ className?: string }>; children: React.ReactNode }) {
   return (
-    <div className="rounded-md border border-border bg-card px-4 py-2 shadow-card">
-      <div className="stat-label">{label}</div>
-      <div className={`font-display text-xl ${accent ? "text-gold" : "text-foreground"}`}>{value}</div>
-    </div>
+    <button onClick={onClick} className={`inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-sm font-medium transition-colors ${active ? "bg-card text-foreground shadow-card" : "text-muted-foreground hover:text-foreground"}`}>
+      <Icon className="h-4 w-4" /> {children}
+    </button>
   );
 }
 
-function FilterPill({
-  active, onClick, children, color,
-}: { active: boolean; onClick: () => void; children: React.ReactNode; color?: string }) {
+function FilterPill({ active, onClick, children, color }: { active: boolean; onClick: () => void; children: React.ReactNode; color?: string }) {
   return (
-    <button
-      onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
-        active ? "border-foreground/20 bg-secondary text-foreground" : "border-border bg-background text-muted-foreground hover:text-foreground"
-      }`}
-    >
+    <button onClick={onClick} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${active ? "border-foreground/20 bg-secondary text-foreground" : "border-border bg-background text-muted-foreground hover:text-foreground"}`}>
       {color && <span className="h-2 w-2 rounded-full" style={{ background: active ? color : "transparent", border: `1px solid ${color}` }} />}
       {children}
     </button>
   );
 }
 
-function DevelopmentDrawer({ dev, onClose }: { dev: Development; onClose: () => void }) {
-  const listing = listingInfo(dev);
-  const permits = permitTimeline(dev);
-  const architect = architectFor(dev);
-  const ppsf = ppsfSummary(dev.city);
-  const trend = metroTrend(dev.city);
-  const opp = scoreOpportunity({
-    city: dev.city,
-    type: dev.productType,
-    buildableSqft: dev.buildingSqft,
-    areaPpsf: ppsf.current,
-  });
-  const builderSearch = `https://www.google.com/search?q=${encodeURIComponent(`${dev.developer} ${dev.city} ${dev.state} home builder`)}`;
-  const comps = developments
-    .filter((d) => d.city === dev.city && d.id !== dev.id)
-    .slice(0, 4)
-    .map((d) => ({ id: d.id, name: d.name, ppsf: Math.round(d.estValue / d.buildingSqft) }));
-  const analyzerHref = `/deal-analyzer?arv=${dev.estValue}&costPerSqft=${dev.pricePerSqft}&totalSqft=${dev.buildingSqft}&productType=${encodeURIComponent(dev.productType)}&address=${encodeURIComponent(
-    `${dev.name}, ${dev.city}, ${dev.state}`,
-  )}`;
+// ── Rail cards ──────────────────────────────────────────────────────────────
+function DevCard({ d, selected, onClick }: { d: Development; selected: boolean; onClick: () => void }) {
+  const opp = devOpportunity(d);
+  return (
+    <button onClick={onClick} className={`w-full text-left rounded-md border bg-card overflow-hidden transition-colors hover:bg-secondary/40 ${selected ? "border-gold ring-1 ring-gold/40" : "border-border"}`}>
+      <div className="flex gap-3 p-2.5">
+        <img src={imageFor(d)} onError={(e) => { const im = e.currentTarget; if (im.dataset.f !== "1") { im.dataset.f = "1"; im.src = imageFallback(d); } }} alt="" className="h-16 w-20 rounded object-cover flex-none bg-secondary" loading="lazy" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium truncate text-sm">{d.name}</span>
+            <span className="h-2.5 w-2.5 rounded-full flex-none" style={{ background: TYPE_COLOR[d.productType] }} />
+          </div>
+          <div className="text-xs text-muted-foreground">{d.city}, {d.state} · {d.units}u · {d.status}</div>
+          <div className="mt-1 text-xs">
+            <span className="text-muted-foreground">Max land offer </span>
+            <span className="text-gold font-medium">{fmtMoney(opp.maxLandPrice)}</span>
+          </div>
+        </div>
+      </div>
+    </button>
+  );
+}
 
+function ListingCard({ l, selected, onClick }: { l: Listing; selected: boolean; onClick: () => void }) {
+  const opp = listingOpportunity(l);
+  const deal = opp.atPrice?.isDeal;
+  return (
+    <button onClick={onClick} className={`w-full text-left rounded-md border bg-card overflow-hidden transition-colors hover:bg-secondary/40 ${selected ? "border-gold ring-1 ring-gold/40" : "border-border"}`}>
+      <div className="p-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-display text-lg">{fmtMoney(l.listPrice)}</span>
+          {deal ? <Badge variant="gold">Deal · {fmtPct(opp.atPrice!.margin)}</Badge> : <Badge variant="secondary">{fmtPct(opp.atPrice?.margin ?? 0)}</Badge>}
+        </div>
+        <div className="text-sm truncate">{l.address}</div>
+        <div className="text-xs text-muted-foreground">
+          {l.city}, {l.state} · {l.kind}{l.beds != null ? ` · ${l.beds}bd/${l.baths}ba` : ""} · {fmtNumber(l.lotSqft)} sf lot
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// ── Shared panel bits ───────────────────────────────────────────────────────
+function Drawer({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[2000] grid place-items-end" onClick={onClose}>
       <div className="absolute inset-0 bg-foreground/20 backdrop-blur-sm" />
       <div className="relative h-full w-full sm:w-[460px] bg-card border-l border-border shadow-elevated overflow-y-auto animate-fade-in" onClick={(e) => e.stopPropagation()}>
-        {/* Building image / rendering */}
-        <div className="relative h-48 w-full bg-secondary">
-          <img
-            src={imageFor(dev)}
-            alt={`${dev.name} rendering`}
-            className="h-full w-full object-cover"
-            loading="lazy"
-            onError={(e) => {
-              const img = e.currentTarget;
-              if (img.dataset.fallback !== "1") { img.dataset.fallback = "1"; img.src = imageFallback(dev); }
-            }}
-          />
-          <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/45 to-transparent" />
-          <button onClick={onClose} className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-card/90 text-foreground shadow-card hover:bg-card">
-            <X className="h-4 w-4" />
-          </button>
-          <span className="absolute left-3 top-3"><Badge variant="gold">{dev.status}</Badge></span>
-          <span className="absolute bottom-2 right-3 text-[10px] text-white/80">representative rendering</span>
-        </div>
-        <div className="p-6">
-          <h2 className="font-display text-2xl">{dev.name}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{dev.city}, {dev.state}</p>
-          <span className="mt-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-white" style={{ background: TYPE_COLOR[dev.productType] }}>{dev.productType}</span>
-          <p className="mt-4 text-sm text-foreground/90 leading-relaxed">{dev.description}</p>
-
-          <StreetWalk lat={dev.lat} lng={dev.lng} />
-
-          {/* Key metrics */}
-          <div className="mt-6 grid grid-cols-2 gap-3">
-            <Metric icon={Building2} label="Units" value={fmtNumber(dev.units)} />
-            <Metric icon={Layers3} label="Stories" value={fmtNumber(dev.stories)} />
-            <Metric icon={Ruler} label="Land" value={`${fmtNumber(dev.landSqft)} sf`} />
-            <Metric icon={Ruler} label="Building" value={`${fmtNumber(dev.buildingSqft)} sf`} />
-          </div>
-
-          {/* Deal X-ray — the developer's genius overlay */}
-          <div className="mt-6 rounded-md border border-gold/40 bg-gold-muted/30 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="stat-label flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-gold" /> Deal X-ray</div>
-              <Badge variant="gold">{fmtPct(opp.targetMargin)} target margin</Badge>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Metric icon={Ruler} label="Est. build cost" value={`$${opp.buildPpsf}/sf`} />
-              <Metric icon={TrendingUp} label="Sells at area rate" value={fmtMoney(opp.arv)} accent />
-            </div>
-            <div className="mt-3 rounded-md border border-border bg-card p-3">
-              <div className="stat-label">Max land offer to hit {fmtPct(opp.targetMargin)}</div>
-              <div className="font-display text-2xl text-gold">{fmtMoney(opp.maxLandPrice)}</div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Pay at or below this for the lot and the deal works. Build ≈ {fmtMoney(opp.buildCost)},
-                sells ≈ {fmtMoney(opp.arv)} at {dev.city} rates.
-              </p>
-            </div>
-          </div>
-
-          {/* Market $/sqft confidence */}
-          <Section title="Area $/sqft trend" tag="modeled from sold comps">
-            <div className="flex items-end justify-between mb-1">
-              <div>
-                <div className="font-display text-2xl text-gold">${ppsf.current}/sf</div>
-                <div className="text-xs text-muted-foreground flex items-center gap-1">
-                  <TrendingUp className="h-3 w-3" /> ${ppsf.low}–${ppsf.high} range since {ppsf.since}
-                </div>
-              </div>
-            </div>
-            <ResponsiveContainer width="100%" height={150}>
-              <ComposedChart data={trend} margin={{ top: 8, right: 6, bottom: 0, left: -20 }}>
-                <defs>
-                  <linearGradient id="ppsf" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="hsl(38 48% 52%)" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="hsl(38 48% 52%)" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(30 15% 88%)" vertical={false} />
-                <XAxis dataKey="quarter" tick={{ fontSize: 10 }} interval={1} />
-                <YAxis tick={{ fontSize: 10 }} width={46} tickFormatter={(v) => `$${v}`} />
-                <RTooltip formatter={(v: number) => [`$${v}/sf`, ""]} contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid hsl(30 15% 86%)" }} />
-                <Area type="monotone" dataKey="high" stroke="none" fill="url(#ppsf)" />
-                <Line type="monotone" dataKey="high" stroke="hsl(25 10% 65%)" strokeWidth={1} strokeDasharray="3 3" dot={false} />
-                <Line type="monotone" dataKey="low" stroke="hsl(25 10% 65%)" strokeWidth={1} strokeDasharray="3 3" dot={false} />
-                <Line type="monotone" dataKey="ppsf" stroke="hsl(38 48% 42%)" strokeWidth={2} dot={false} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </Section>
-
-          {/* Listing & sale */}
-          <Section title="Listing & sale" tag="MLS / public record">
-            <Row label="Status" value={listing.status} />
-            {listing.status === "Listed for sale" && (
-              <>
-                <Row label="List price" value={fmtMoney(listing.listPrice)} />
-                <Row label="Days on market" value={`${listing.daysOnMarket} days`} />
-                {listing.zillowUrl && (
-                  <a href={listing.zillowUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-gold hover:underline">
-                    View comparable listings <ExternalLink className="h-3 w-3" />
-                  </a>
-                )}
-              </>
-            )}
-            {listing.status === "Recently sold" && (
-              <>
-                <Row label="Sold price" value={fmtMoney(listing.soldPrice)} />
-                <Row label="Sold date" value={listing.soldDate ?? "—"} />
-              </>
-            )}
-            {(listing.status === "Under construction" || listing.status === "Pre-construction") && (
-              <p className="text-xs text-muted-foreground">Not yet on market — projected value {fmtMoney(dev.estValue)}.</p>
-            )}
-          </Section>
-
-          {/* Project team — one click to reach the builder */}
-          <Section title="Project team" tag="permit record">
-            <div className="flex items-center justify-between text-sm py-1">
-              <span className="text-muted-foreground inline-flex items-center gap-1.5"><HardHat className="h-3.5 w-3.5" /> Developer / GC</span>
-              <a href={builderSearch} target="_blank" rel="noreferrer" className="font-medium text-gold hover:underline inline-flex items-center gap-1">
-                {dev.developer} <Globe className="h-3 w-3" />
-              </a>
-            </div>
-            <Row label={<span className="inline-flex items-center gap-1.5"><PencilRuler className="h-3.5 w-3.5" /> Architect</span>} value={architect} />
-          </Section>
-
-          {/* Permit timeline */}
-          <Section title="Permit timeline" tag="public record">
-            <Timeline
-              steps={[
-                { label: "Filed", date: permits.filed, done: true },
-                { label: "Approved", date: permits.approved, done: true },
-                { label: "Permit issued", date: permits.issued, done: !!permits.issued },
-                { label: "Target completion", date: permits.targetCompletion, done: dev.status === "Completed" },
-              ]}
-            />
-          </Section>
-
-          {/* Comparable projects nearby */}
-          {comps.length > 0 && (
-            <Section title={`Comparable projects in ${dev.city}`} tag="from active pipeline">
-              <ul className="space-y-1.5">
-                {comps.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between text-sm">
-                    <span className="text-foreground truncate pr-3">{c.name}</span>
-                    <span className="text-gold font-medium tabular-nums">${c.ppsf}/sf</span>
-                  </li>
-                ))}
-              </ul>
-            </Section>
-          )}
-
-          {/* Build cost + underwrite */}
-          <div className="mt-6 rounded-md border border-border bg-secondary/40 p-4">
-            <div className="flex items-center justify-between">
-              <div className="stat-label">Build cost assumption</div>
-              <Badge variant="secondary">estimated</Badge>
-            </div>
-            <div className="font-display text-xl mt-1">{fmtMoney(dev.pricePerSqft)}/sf</div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Regional $/sf estimate (permit declared valuation used where available). Pre-fills the Deal Analyzer.
-            </p>
-          </div>
-
-          <div className="mt-4 flex gap-2 pb-2">
-            <Button variant="gold" className="flex-1" asChild>
-              <Link to={analyzerHref}>Underwrite this deal <ArrowRight className="h-4 w-4" /></Link>
-            </Button>
-            <Button variant="outline" onClick={onClose}>Close</Button>
-          </div>
-
-          <p className="text-[11px] text-muted-foreground/80">
-            Demo data — modeled from realistic assumptions. Live ATTOM, Shovels, and MLS feeds replace these values without changing this view.
-          </p>
-        </div>
+        {children}
       </div>
-    </div>
-  );
-}
-
-function StreetWalk({ lat, lng }: { lat: number; lng: number }) {
-  // Zero-key: opens Google Maps Street View at these coordinates in a new tab.
-  const panoUrl = `https://www.google.com/maps?q&layer=c&cbll=${lat},${lng}`;
-  return (
-    <div className="mt-6">
-      <div className="flex items-center justify-between mb-2">
-        <div className="stat-label">Street view</div>
-        <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">walk the block</span>
-      </div>
-      {GOOGLE_MAPS_KEY ? (
-        <>
-          <iframe
-            title="Street View"
-            className="w-full h-56 rounded-md border border-border"
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-            allowFullScreen
-            src={`https://www.google.com/maps/embed/v1/streetview?key=${GOOGLE_MAPS_KEY}&location=${lat},${lng}&heading=210&pitch=10&fov=80`}
-          />
-          <a href={panoUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-gold hover:underline">
-            Open full Street View <ExternalLink className="h-3 w-3" />
-          </a>
-        </>
-      ) : (
-        <a
-          href={panoUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="flex items-center justify-center gap-2 rounded-md border border-border bg-secondary/40 py-3 text-sm font-medium text-foreground hover:bg-secondary transition-colors"
-        >
-          Walk this street in Google Maps <ExternalLink className="h-4 w-4" />
-        </a>
-      )}
     </div>
   );
 }
@@ -625,14 +400,223 @@ function Row({ label, value }: { label: React.ReactNode; value: string }) {
   );
 }
 
-function Metric({
-  icon: Icon, label, value, accent,
-}: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; accent?: boolean }) {
+function Metric({ icon: Icon, label, value, accent }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; accent?: boolean }) {
   return (
     <div className="rounded-md border border-border bg-card p-3">
       <div className="flex items-center gap-1.5 stat-label"><Icon className="h-3.5 w-3.5" /> {label}</div>
       <div className={`font-display text-lg mt-1 ${accent ? "text-gold" : "text-foreground"}`}>{value}</div>
     </div>
+  );
+}
+
+function StreetWalk({ lat, lng }: { lat: number; lng: number }) {
+  const panoUrl = `https://www.google.com/maps?q&layer=c&cbll=${lat},${lng}`;
+  return (
+    <div className="mt-6">
+      <div className="flex items-center justify-between mb-2">
+        <div className="stat-label">Street view</div>
+        <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">walk the block</span>
+      </div>
+      {GOOGLE_MAPS_KEY ? (
+        <>
+          <iframe title="Street View" className="w-full h-56 rounded-md border border-border" loading="lazy" referrerPolicy="no-referrer-when-downgrade" allowFullScreen
+            src={`https://www.google.com/maps/embed/v1/streetview?key=${GOOGLE_MAPS_KEY}&location=${lat},${lng}&heading=210&pitch=10&fov=80`} />
+          <a href={panoUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-gold hover:underline">Open full Street View <ExternalLink className="h-3 w-3" /></a>
+        </>
+      ) : (
+        <a href={panoUrl} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 rounded-md border border-border bg-secondary/40 py-3 text-sm font-medium text-foreground hover:bg-secondary transition-colors">
+          Walk this street in Google Maps <ExternalLink className="h-4 w-4" />
+        </a>
+      )}
+    </div>
+  );
+}
+
+/** Editable inline underwrite — live margin + Max Allowable Offer, no page change. */
+function InlineUnderwrite({
+  city, type, buildableSqft, initialLand, address,
+}: { city: string; type: ProductType; buildableSqft: number; initialLand: number; address: string }) {
+  const area = ppsfSummary(city).current;
+  const [land, setLand] = React.useState(initialLand);
+  const [bppsf, setBppsf] = React.useState(buildPpsf(city, type));
+  const [sale, setSale] = React.useState(Math.round(area));
+  const opp = scoreOpportunity({ city, type, buildableSqft, areaPpsf: sale, landPrice: land, buildPpsfOverride: bppsf });
+  const margin = opp.atPrice?.margin ?? 0;
+  const deal = opp.atPrice?.isDeal;
+  const href = `/deal-analyzer?arv=${opp.arv}&costPerSqft=${bppsf}&totalSqft=${buildableSqft}&landCost=${land}&productType=${encodeURIComponent(type)}&address=${encodeURIComponent(address)}`;
+
+  return (
+    <div className="mt-6 rounded-md border border-gold/40 bg-gold-muted/30 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="stat-label flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-gold" /> Underwrite it</div>
+        <Badge variant={deal ? "gold" : "secondary"}>{deal ? "Deal" : "Below target"} · {fmtPct(margin)}</Badge>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <NumericField label="Land" value={land} onChange={setLand} prefix="$" />
+        <NumericField label="Build $/sf" value={bppsf} onChange={setBppsf} prefix="$" />
+        <NumericField label="Sell $/sf" value={sale} onChange={setSale} prefix="$" />
+      </div>
+      <div className="mt-3 space-y-1">
+        <Row label="Sells for (ARV)" value={fmtMoney(opp.arv)} />
+        <Row label="All-in cost" value={fmtMoney(opp.atPrice?.allIn ?? 0)} />
+        <Row label="Profit" value={fmtMoney(opp.atPrice?.profit ?? 0)} />
+        <div className="flex items-center justify-between text-sm py-1">
+          <span className="text-muted-foreground">Max land offer ({fmtPct(opp.targetMargin)})</span>
+          <span className="font-medium text-gold tabular-nums">{fmtMoney(opp.maxLandPrice)}</span>
+        </div>
+      </div>
+      <Button variant="gold" className="w-full mt-3" asChild>
+        <Link to={href}>Open full underwriting <ArrowRight className="h-4 w-4" /></Link>
+      </Button>
+    </div>
+  );
+}
+
+function PpsfChart({ city }: { city: string }) {
+  const data = metroTrend(city);
+  return (
+    <ResponsiveContainer width="100%" height={150}>
+      <ComposedChart data={data} margin={{ top: 8, right: 6, bottom: 0, left: -20 }}>
+        <defs>
+          <linearGradient id="ppsf" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="hsl(38 48% 52%)" stopOpacity={0.35} />
+            <stop offset="100%" stopColor="hsl(38 48% 52%)" stopOpacity={0.02} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="hsl(30 15% 88%)" vertical={false} />
+        <XAxis dataKey="quarter" tick={{ fontSize: 10 }} interval={1} />
+        <YAxis tick={{ fontSize: 10 }} width={46} tickFormatter={(v) => `$${v}`} />
+        <RTooltip formatter={(v: number) => [`$${v}/sf`, ""]} contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid hsl(30 15% 86%)" }} />
+        <Area type="monotone" dataKey="high" stroke="none" fill="url(#ppsf)" />
+        <Line type="monotone" dataKey="high" stroke="hsl(25 10% 65%)" strokeWidth={1} strokeDasharray="3 3" dot={false} />
+        <Line type="monotone" dataKey="low" stroke="hsl(25 10% 65%)" strokeWidth={1} strokeDasharray="3 3" dot={false} />
+        <Line type="monotone" dataKey="ppsf" stroke="hsl(38 48% 42%)" strokeWidth={2} dot={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ── Construction panel ──────────────────────────────────────────────────────
+function DevelopmentPanel({ dev, onClose }: { dev: Development; onClose: () => void }) {
+  const listing = listingInfo(dev);
+  const permits = permitTimeline(dev);
+  const architect = architectFor(dev);
+  const ppsf = ppsfSummary(dev.city);
+  const builderSearch = `https://www.google.com/search?q=${encodeURIComponent(`${dev.developer} ${dev.city} ${dev.state} home builder`)}`;
+
+  return (
+    <Drawer onClose={onClose}>
+      <div className="relative h-48 w-full bg-secondary">
+        <img src={imageFor(dev)} alt="" className="h-full w-full object-cover" loading="lazy"
+          onError={(e) => { const im = e.currentTarget; if (im.dataset.f !== "1") { im.dataset.f = "1"; im.src = imageFallback(dev); } }} />
+        <button onClick={onClose} className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-card/90 text-foreground shadow-card hover:bg-card"><X className="h-4 w-4" /></button>
+        <span className="absolute left-3 top-3"><Badge variant="gold">{dev.status}</Badge></span>
+      </div>
+      <div className="p-6">
+        <h2 className="font-display text-2xl">{dev.name}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{dev.city}, {dev.state}</p>
+        <span className="mt-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-white" style={{ background: TYPE_COLOR[dev.productType] }}>{dev.productType}</span>
+        <p className="mt-4 text-sm text-foreground/90 leading-relaxed">{dev.description}</p>
+
+        <StreetWalk lat={dev.lat} lng={dev.lng} />
+
+        <div className="mt-6 grid grid-cols-2 gap-3">
+          <Metric icon={Building2} label="Units" value={fmtNumber(dev.units)} />
+          <Metric icon={Layers3} label="Stories" value={fmtNumber(dev.stories)} />
+          <Metric icon={Ruler} label="Land" value={`${fmtNumber(dev.landSqft)} sf`} />
+          <Metric icon={Ruler} label="Building" value={`${fmtNumber(dev.buildingSqft)} sf`} />
+        </div>
+
+        <InlineUnderwrite city={dev.city} type={dev.productType} buildableSqft={dev.buildingSqft} initialLand={Math.round(devOpportunity(dev).maxLandPrice)} address={`${dev.name}, ${dev.city}, ${dev.state}`} />
+
+        <Section title="Area $/sqft trend" tag="modeled from sold comps">
+          <div className="font-display text-2xl text-gold">${ppsf.current}/sf</div>
+          <div className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><TrendingUp className="h-3 w-3" /> ${ppsf.low}–${ppsf.high} range since {ppsf.since}</div>
+          <PpsfChart city={dev.city} />
+        </Section>
+
+        <Section title="Listing & sale" tag="MLS / public record">
+          <Row label="Status" value={listing.status} />
+          {listing.status === "Listed for sale" && <><Row label="List price" value={fmtMoney(listing.listPrice)} /><Row label="Days on market" value={`${listing.daysOnMarket} days`} /></>}
+          {listing.status === "Recently sold" && <><Row label="Sold price" value={fmtMoney(listing.soldPrice)} /><Row label="Sold date" value={listing.soldDate ?? "—"} /></>}
+        </Section>
+
+        <Section title="Project team" tag="permit record">
+          <div className="flex items-center justify-between text-sm py-1">
+            <span className="text-muted-foreground inline-flex items-center gap-1.5"><HardHat className="h-3.5 w-3.5" /> Developer / GC</span>
+            <a href={builderSearch} target="_blank" rel="noreferrer" className="font-medium text-gold hover:underline inline-flex items-center gap-1">{dev.developer} <Globe className="h-3 w-3" /></a>
+          </div>
+          <Row label={<span className="inline-flex items-center gap-1.5"><PencilRuler className="h-3.5 w-3.5" /> Architect</span>} value={architect} />
+        </Section>
+
+        <Section title="Permit timeline" tag="public record">
+          <Timeline steps={[
+            { label: "Filed", date: permits.filed, done: true },
+            { label: "Approved", date: permits.approved, done: true },
+            { label: "Permit issued", date: permits.issued, done: !!permits.issued },
+            { label: "Target completion", date: permits.targetCompletion, done: dev.status === "Completed" },
+          ]} />
+        </Section>
+      </div>
+    </Drawer>
+  );
+}
+
+// ── Listing panel ───────────────────────────────────────────────────────────
+function ListingPanel({ listing: l, onClose }: { listing: Listing; onClose: () => void }) {
+  const opp = listingOpportunity(l);
+  const deal = opp.atPrice?.isDeal;
+  const priceData = l.priceHistory.map((p) => ({ label: p.date.slice(0, 7), price: p.price, event: p.event }));
+
+  return (
+    <Drawer onClose={onClose}>
+      <div className="p-6">
+        <div className="flex items-start justify-between">
+          <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-white" style={{ background: LISTING_COLOR[l.kind] }}>{l.kind}</span>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="mt-3 flex items-end justify-between">
+          <h2 className="font-display text-3xl">{fmtMoney(l.listPrice)}</h2>
+          {deal ? <Badge variant="gold">Deal · {fmtPct(opp.atPrice!.margin)}</Badge> : <Badge variant="secondary">{fmtPct(opp.atPrice?.margin ?? 0)} margin</Badge>}
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">{l.address} · {l.city}, {l.state}</p>
+
+        <StreetWalk lat={l.lat} lng={l.lng} />
+
+        <div className="mt-6 grid grid-cols-2 gap-3">
+          <Metric icon={Ruler} label="Lot size" value={`${fmtNumber(l.lotSqft)} sf`} />
+          <Metric icon={CalendarDays} label="Days on market" value={`${l.daysOnMarket}`} />
+          {l.beds != null && <Metric icon={Home} label="Beds / baths" value={`${l.beds} / ${l.baths}`} />}
+          {l.yearBuilt != null && <Metric icon={Building2} label="Year built" value={`${l.yearBuilt}`} />}
+        </div>
+
+        <Section title="Price history" tag="public record">
+          <ResponsiveContainer width="100%" height={130}>
+            <ComposedChart data={priceData} margin={{ top: 8, right: 6, bottom: 0, left: -10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(30 15% 88%)" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 10 }} width={54} tickFormatter={(v) => `$${Math.round(v / 1000)}k`} />
+              <RTooltip formatter={(v: number) => [fmtMoney(v), ""]} contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid hsl(30 15% 86%)" }} />
+              <Line type="monotone" dataKey="price" stroke="hsl(38 48% 42%)" strokeWidth={2} dot={{ r: 3 }} />
+            </ComposedChart>
+          </ResponsiveContainer>
+          <div className="space-y-1 mt-1">
+            {l.priceHistory.map((p, i) => (
+              <div key={i} className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">{p.event} · {p.date}</span>
+                <span className="tabular-nums">{fmtMoney(p.price)}</span>
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        <InlineUnderwrite city={l.city} type={l.productTypeIfBuilt} buildableSqft={l.buildableSqft} initialLand={l.listPrice} address={`${l.address}, ${l.city}, ${l.state}`} />
+
+        <p className="mt-4 text-[11px] text-muted-foreground/80">
+          Buildable ≈ {fmtNumber(l.buildableSqft)} sf {l.productTypeIfBuilt}. Demo listing — swaps for live MLS/ATTOM data.
+        </p>
+      </div>
+    </Drawer>
   );
 }
 

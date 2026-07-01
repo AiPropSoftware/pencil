@@ -50,11 +50,13 @@ export default function DealAnalyzer() {
     const arv = Number(params.get("arv"));
     const costPerSqft = Number(params.get("costPerSqft"));
     const totalSqft = Number(params.get("totalSqft"));
+    const landCost = Number(params.get("landCost"));
     const address = params.get("address") ?? undefined;
     const productType = params.get("productType");
     if (Number.isFinite(arv) && arv > 0) setInputs((p) => ({ ...p, arv }));
     if (Number.isFinite(costPerSqft) && costPerSqft > 0) setInputs((p) => ({ ...p, costPerSqft }));
     if (Number.isFinite(totalSqft) && totalSqft > 0) setInputs((p) => ({ ...p, totalSqft }));
+    if (Number.isFinite(landCost) && landCost > 0) setInputs((p) => ({ ...p, landCost }));
     if (address) setInputs((p) => ({ ...p, address }));
     // Single-family → build-to-sell (no refi/rental; selling costs apply).
     if (productType === "SFH") {
