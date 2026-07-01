@@ -157,5 +157,6 @@ export async function fetchCityDevelopments(src: CitySource, limit = 400): Promi
     });
   }
 
-  return { items: out.slice(0, 300), total: rows.length, columns, url };
+  out.sort((a, b) => (a.approvedDate > b.approvedDate ? -1 : 1)); // most recent first
+  return { items: out.slice(0, 400), total: rows.length, columns, url };
 }

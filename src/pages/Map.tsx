@@ -166,7 +166,7 @@ export default function MapPage() {
 
   React.useEffect(() => {
     let cancelled = false;
-    fetchCityDevelopments(AUSTIN)
+    fetchCityDevelopments(AUSTIN, 8000)
       .then((r) => { if (!cancelled) setLiveResult(r); })
       .catch((e) => { if (!cancelled) setLiveResult({ items: [], total: 0, columns: [], url: "", error: String(e) }); });
     return () => { cancelled = true; };
