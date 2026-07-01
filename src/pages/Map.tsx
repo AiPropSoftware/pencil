@@ -20,7 +20,7 @@ import {
 } from "@/data/developments";
 import { listings, LISTING_KINDS, LISTING_COLOR, type Listing, type ListingKind } from "@/data/listings";
 import { fetchAllCityDevelopments, type LivePermits } from "@/providers/permits/socrata";
-import { scoreOpportunity, buildPpsf } from "@/lib/underwrite/opportunity";
+import { scoreOpportunity, buildPpsf, PLAUSIBLE_MARGIN_CAP } from "@/lib/underwrite/opportunity";
 import { setLiveBuildCosts, getLiveBuildCost } from "@/lib/underwrite/liveCosts";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { toast } from "sonner";
@@ -576,6 +576,20 @@ function DevCard({ d, selected, watched, onWatch, onClick }: { d: Development; s
   );
 }
 
+/** Margin badge with built-in skepticism: implausibly high margins say "verify", not "deal". */
+function MarginBadge({ margin, deal }: { margin: number; deal: boolean }) {
+  if (margin > PLAUSIBLE_MARGIN_CAP) {
+    return (
+      <Badge variant="outline" title="Margin above the plausible range — the area $/sf assumption likely doesn't fit this parcel. Open it and edit the inputs.">
+        Verify · {fmtPct(margin)}
+      </Badge>
+    );
+  }
+  return deal
+    ? <Badge variant="gold">Deal · {fmtPct(margin)}</Badge>
+    : <Badge variant="secondary">{fmtPct(margin)}</Badge>;
+}
+
 function ListingCard({ l, selected, watched, onWatch, onClick }: { l: Listing; selected: boolean; watched: boolean; onWatch: () => void; onClick: () => void }) {
   const opp = listingOpportunity(l);
   const deal = opp.atPrice?.isDeal;
@@ -585,7 +599,7 @@ function ListingCard({ l, selected, watched, onWatch, onClick }: { l: Listing; s
         <div className="flex items-center justify-between gap-2">
           <span className="font-display text-lg">{fmtMoney(l.listPrice)}</span>
           <span className="flex items-center gap-1">
-            {deal ? <Badge variant="gold">Deal · {fmtPct(opp.atPrice!.margin)}</Badge> : <Badge variant="secondary">{fmtPct(opp.atPrice?.margin ?? 0)}</Badge>}
+            <MarginBadge margin={opp.atPrice?.margin ?? 0} deal={!!deal} />
             <WatchHeart watched={watched} onWatch={onWatch} />
           </span>
         </div>
@@ -680,7 +694,9 @@ function InlineUnderwrite({
     <div className="mt-6 rounded-md border border-gold/40 bg-gold-muted/30 p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="stat-label flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-gold" /> Underwrite it</div>
-        <Badge variant={deal ? "gold" : "secondary"}>{deal ? "Deal" : "Below target"} · {fmtPct(margin)}</Badge>
+        {margin > PLAUSIBLE_MARGIN_CAP
+          ? <Badge variant="outline" title="Margin above the plausible range — check the sell $/sf against real comps for this exact block.">Verify inputs · {fmtPct(margin)}</Badge>
+          : <Badge variant={deal ? "gold" : "secondary"}>{deal ? "Deal" : "Below target"} · {fmtPct(margin)}</Badge>}
       </div>
       <div className="grid grid-cols-3 gap-2">
         <NumericField label="Land" value={land} onChange={setLand} prefix="$" />
@@ -867,7 +883,7 @@ function ListingPanel({ listing: l, watched, onWatch, onClose }: { listing: List
         </div>
         <div className="mt-3 flex items-end justify-between">
           <h2 className="font-display text-3xl">{fmtMoney(l.listPrice)}</h2>
-          {deal ? <Badge variant="gold">Deal · {fmtPct(opp.atPrice!.margin)}</Badge> : <Badge variant="secondary">{fmtPct(opp.atPrice?.margin ?? 0)} margin</Badge>}
+          <MarginBadge margin={opp.atPrice?.margin ?? 0} deal={!!deal} />
         </div>
         <p className="mt-1 text-sm text-muted-foreground">{l.address} · {l.city}, {l.state}</p>
 

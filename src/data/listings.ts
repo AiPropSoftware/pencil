@@ -7,6 +7,7 @@
  * Demo data for now; swaps for MLS/ATTOM listings without UI changes.
  */
 import { METRO_CENTERS, type ProductType } from "./developments";
+import { scoreOpportunity } from "@/lib/underwrite/opportunity";
 
 export type ListingKind = "Vacant land" | "Teardown" | "SFH resale" | "Multifamily";
 
@@ -79,18 +80,17 @@ export const listings: Listing[] = (() => {
   const cities = Object.keys(METRO_CENTERS);
   cities.forEach((city, ci) => {
     const m = METRO_CENTERS[city];
-    const tier = m.ppsf >= 600 ? 1.6 : m.ppsf >= 450 ? 1.25 : 1.0;
     for (let i = 0; i < 14; i++) {
       const kind = LISTING_KINDS[(ci * 2 + i) % LISTING_KINDS.length];
       const h = hash(`${city}-${i}`);
       const lotSqft = 4000 + (h % 14) * 850;
       const built = buildableFor(kind, lotSqft);
-      const base =
-        kind === "Vacant land" ? 190_000 :
-        kind === "Teardown" ? 340_000 :
-        kind === "SFH resale" ? 430_000 :
-        620_000;
-      const listPrice = Math.round((base * tier * (0.72 + (h % 14) * 0.045)) / 1000) * 1000;
+      // Price the parcel around what the underwrite says the land can support,
+      // so demo margins land in a realistic -10%..+35% band instead of nonsense.
+      const opp = scoreOpportunity({ city, type: built.type, buildableSqft: built.sqft, areaPpsf: m.ppsf });
+      const mult = 0.82 + (h % 12) * 0.05; // 0.82 .. 1.37 × max supportable land value
+      const existingPremium = kind === "SFH resale" ? 1.15 : kind === "Multifamily" ? 1.1 : 1; // standing income/structure value
+      const listPrice = Math.max(60_000, Math.round((opp.maxLandPrice * mult * existingPremium) / 1000) * 1000);
       const angle = ci * 1.9 + i * 0.61;
       const ring = 0.006 + ((i * 3) % 9) * 0.005;          // ~0.4–2.5 mi, tight
       const inland = m.lng < -98 ? 1 : -1;                 // push toward US interior

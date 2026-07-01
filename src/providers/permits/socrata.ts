@@ -85,11 +85,11 @@ export interface CitySource {
  */
 export const CITY_SOURCES: CitySource[] = [
   { city: "Austin", state: "TX", url: "https://data.austintexas.gov/resource/3syk-w9eu.json", metroPpsf: 470, lat: 30.27, lng: -97.74, limit: 8000 },
-  { city: "Chicago", state: "IL", url: "https://data.cityofchicago.org/resource/ydr8-5enu.json", metroPpsf: 400, lat: 41.88, lng: -87.63, limit: 4000 },
-  { city: "Seattle", state: "WA", url: "https://data.seattle.gov/resource/76t5-zqzr.json", metroPpsf: 720, lat: 47.61, lng: -122.33, limit: 4000 },
-  { city: "San Francisco", state: "CA", url: "https://data.sfgov.org/resource/i98e-djp9.json", metroPpsf: 950, lat: 37.77, lng: -122.42, limit: 4000 },
-  { city: "Nashville", state: "TN", url: "https://data.nashville.gov/resource/kqff-rxj8.json", metroPpsf: 420, lat: 36.16, lng: -86.78, limit: 4000 },
-  { city: "New York", state: "NY", url: "https://data.cityofnewyork.us/resource/ipu4-2q9a.json", metroPpsf: 1100, lat: 40.71, lng: -74.01, limit: 4000 },
+  { city: "Chicago", state: "IL", url: "https://data.cityofchicago.org/resource/ydr8-5enu.json", metroPpsf: 400, lat: 41.88, lng: -87.63, limit: 6000 },
+  { city: "Seattle", state: "WA", url: "https://data.seattle.gov/resource/76t5-zqzr.json", metroPpsf: 720, lat: 47.61, lng: -122.33, limit: 6000 },
+  { city: "San Francisco", state: "CA", url: "https://data.sfgov.org/resource/i98e-djp9.json", metroPpsf: 950, lat: 37.77, lng: -122.42, limit: 6000 },
+  { city: "Nashville", state: "TN", url: "https://data.nashville.gov/resource/kqff-rxj8.json", metroPpsf: 420, lat: 36.16, lng: -86.78, limit: 6000 },
+  { city: "New York", state: "NY", url: "https://data.cityofnewyork.us/resource/ipu4-2q9a.json", metroPpsf: 900, lat: 40.71, lng: -74.01, limit: 6000 },
 ];
 
 export const AUSTIN = CITY_SOURCES[0];

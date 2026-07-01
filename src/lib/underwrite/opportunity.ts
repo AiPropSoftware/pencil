@@ -73,6 +73,12 @@ const SOFT_PCT = 0.08;      // % of (land + build)
 const FINANCING_PCT = 0.06; // % of build (fees + carry proxy)
 const SELLING_PCT = 0.06;   // commission + sale closing
 
+/**
+ * Margins above this are almost always an input problem (area $/sf that
+ * doesn't fit the parcel), not a real deal — flag them, don't celebrate them.
+ */
+export const PLAUSIBLE_MARGIN_CAP = 0.6;
+
 export function scoreOpportunity(i: OpportunityInput): Opportunity {
   const bppsf = i.buildPpsfOverride ?? buildPpsf(i.city, i.type);
   const buildCost = bppsf * i.buildableSqft;
@@ -104,7 +110,13 @@ export function scoreOpportunity(i: OpportunityInput): Opportunity {
     const profit = arv - sellingCosts - allIn;
     const margin = allIn > 0 ? profit / allIn : 0;
     out.softCosts = Math.round(soft);
-    out.atPrice = { allIn: Math.round(allIn), profit: Math.round(profit), margin, isDeal: margin >= targetMargin };
+    out.atPrice = {
+      allIn: Math.round(allIn),
+      profit: Math.round(profit),
+      margin,
+      // A "deal" must beat target AND stay inside the plausible band.
+      isDeal: margin >= targetMargin && margin <= PLAUSIBLE_MARGIN_CAP,
+    };
   }
 
   return out;
