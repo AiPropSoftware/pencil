@@ -21,6 +21,7 @@ import {
 import { listings, LISTING_KINDS, LISTING_COLOR, type Listing, type ListingKind } from "@/data/listings";
 import { fetchAllCityDevelopments, type LivePermits } from "@/providers/permits/socrata";
 import { scoreOpportunity, buildPpsf } from "@/lib/underwrite/opportunity";
+import { setLiveBuildCosts, getLiveBuildCost } from "@/lib/underwrite/liveCosts";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { toast } from "sonner";
 import {
@@ -182,8 +183,12 @@ export default function MapPage() {
   React.useEffect(() => {
     let cancelled = false;
     fetchAllCityDevelopments()
-      .then((r) => { if (!cancelled) setLive(r); })
-      .catch(() => { if (!cancelled) setLive({ perCity: [], items: [], liveCityNames: [] }); });
+      .then((r) => {
+        if (cancelled) return;
+        setLiveBuildCosts(r.liveBuildCosts); // real permit-derived build $/sf feeds the X-ray
+        setLive(r);
+      })
+      .catch(() => { if (!cancelled) setLive({ perCity: [], items: [], liveCityNames: [], liveBuildCosts: {} }); });
     return () => { cancelled = true; };
   }, []);
 
@@ -285,8 +290,8 @@ export default function MapPage() {
 
   return (
     <div className="flex flex-col">
-      {/* Control bar */}
-      <div className="border-b border-border/60 bg-background/80 backdrop-blur">
+      {/* Control bar — z-index above Leaflet's panes (≤1000) so popovers never clip */}
+      <div className="relative z-[1200] border-b border-border/60 bg-background/80 backdrop-blur">
         <div className="container py-3 flex flex-col lg:flex-row lg:items-center gap-3">
           <div className="flex items-center gap-1 rounded-md border border-border bg-secondary/40 p-1">
             <ToggleBtn active={layer === "construction"} onClick={() => setLayer("construction")} icon={Hammer}>Construction</ToggleBtn>
@@ -452,7 +457,7 @@ function LiveStatusChip({ live }: { live: LivePermits | null }) {
         <span className="text-muted-foreground/60">ⓘ</span>
       </button>
       {open && (
-        <div className="absolute right-0 z-[3000] mt-2 w-96 rounded-md border border-border bg-card p-3 shadow-elevated text-xs">
+        <div className="absolute right-0 z-[3000] mt-2 w-96 max-h-[70vh] overflow-y-auto rounded-md border border-border bg-card p-3 shadow-elevated text-xs">
           <div className="font-medium text-foreground mb-2">Live open-data permit feeds</div>
           {!live && <div className="text-muted-foreground">Loading…</div>}
           {live?.perCity.map((c) => (
@@ -463,7 +468,8 @@ function LiveStatusChip({ live }: { live: LivePermits | null }) {
                   {c.items.length > 0 ? `● ${c.items.length} live` : "no data"}
                 </span>
               </div>
-              <div className="text-muted-foreground">rows {c.total} · usable {c.items.length} ·{" "}
+              <div className="text-muted-foreground">rows {c.total} · usable {c.items.length}
+                {c.medianBuildPpsf ? <> · build <span className="text-foreground">${c.medianBuildPpsf}/sf</span> (n={c.buildPpsfSamples})</> : null} ·{" "}
                 <a href={c.url} target="_blank" rel="noreferrer" className="text-gold hover:underline">raw data</a>
               </div>
               {c.error && <div className="text-destructive break-words">{c.error}</div>}
@@ -662,6 +668,15 @@ function InlineUnderwrite({
       <Button variant="gold" className="w-full mt-3" asChild>
         <Link to={href}>Open full underwriting <ArrowRight className="h-4 w-4" /></Link>
       </Button>
+      <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+        {(() => {
+          const lc = getLiveBuildCost(city);
+          return lc
+            ? `Build $/sf: median of ${lc.samples} real ${city} permits (declared valuations — builders often under-declare; edit to your GC quote).`
+            : "Build $/sf: regional baseline — edit to your GC quote.";
+        })()}{" "}
+        Sell $/sf: area estimate — replace with your comps.
+      </p>
     </div>
   );
 }

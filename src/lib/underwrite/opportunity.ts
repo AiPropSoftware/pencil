@@ -11,6 +11,7 @@
  * real GC bids later). Everything is transparent so the user can override.
  */
 import { METRO_CENTERS, type ProductType } from "@/data/developments";
+import { getLiveBuildCost } from "./liveCosts";
 
 /** Baseline single-family build cost ($/sqft) by metro. Tune with real bids. */
 const BUILD_SFH_PPSF: Record<string, number> = {
@@ -31,10 +32,11 @@ export function targetMarginFor(type: ProductType): number {
 }
 
 export function buildPpsf(city: string, type: ProductType): number {
-  // Known cities use the curated baseline; the rest derive a plausible build
-  // cost from their sale $/sqft (≈ half of sale, bounded), so every metro varies.
+  // Priority: (1) median declared build cost from that city's REAL permits,
+  // (2) curated regional baseline, (3) derived from sale $/sqft, bounded.
+  const live = getLiveBuildCost(city);
   const derived = Math.round(Math.min(400, Math.max(180, (METRO_CENTERS[city]?.ppsf ?? 350) * 0.5)));
-  const base = BUILD_SFH_PPSF[city] ?? derived;
+  const base = live?.ppsf ?? BUILD_SFH_PPSF[city] ?? derived;
   return Math.round(base * (TYPE_BUILD_FACTOR[type] ?? 1));
 }
 

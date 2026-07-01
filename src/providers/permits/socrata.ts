@@ -101,6 +101,9 @@ export interface CityResult {
   columns: string[];  // the city's actual field names (for on-screen tuning)
   url: string;        // the exact request URL (for diagnostics)
   error?: string;
+  /** Median declared build cost ($/sf) computed from real permits. */
+  medianBuildPpsf?: number;
+  buildPpsfSamples: number;
 }
 
 export async function fetchCityDevelopments(src: CitySource, limitOverride?: number): Promise<CityResult> {
@@ -125,20 +128,21 @@ export async function fetchCityDevelopments(src: CitySource, limitOverride?: num
     }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      return { city: src.city, items: [], total: 0, columns: [], url, error: `HTTP ${res.status} · ${body.slice(0, 140)}` };
+      return { city: src.city, items: [], total: 0, columns: [], url, buildPpsfSamples: 0, error: `HTTP ${res.status} · ${body.slice(0, 140)}` };
     }
     const data = await res.json();
     if (!Array.isArray(data)) {
-      return { city: src.city, items: [], total: 0, columns: [], url, error: `Unexpected response: ${JSON.stringify(data).slice(0, 140)}` };
+      return { city: src.city, items: [], total: 0, columns: [], url, buildPpsfSamples: 0, error: `Unexpected response: ${JSON.stringify(data).slice(0, 140)}` };
     }
     rows = data as Record<string, unknown>[];
   } catch (e) {
-    return { city: src.city, items: [], total: 0, columns: [], url, error: `${(e as Error).message} — likely CORS or network block` };
+    return { city: src.city, items: [], total: 0, columns: [], url, buildPpsfSamples: 0, error: `${(e as Error).message} — likely CORS or network block` };
   }
 
   const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
   const seen = new Set<string>();
   const out: Development[] = [];
+  const ppsfSamples: number[] = [];
 
   for (const r of rows) {
     const coords = coordsFrom(r);
@@ -168,8 +172,16 @@ export async function fetchCityDevelopments(src: CitySource, limitOverride?: num
 
     const type = productTypeFrom(blob);
     const units = Math.max(1, Math.round(num(pick(r, ["housing_units", "housingunitsadded", "number_of_dwelling_units", "total_dwelling_units", "proposed_units", "dwelling_units"])) || UNITS_BY_TYPE[type]));
-    const buildingSqft = Math.round(num(pick(r, ["total_new_add_sqft", "building_sqft", "square_feet", "proposed_sqft"])) || units * 1600);
+    const sqftRaw = num(pick(r, ["total_new_add_sqft", "building_sqft", "square_feet", "proposed_sqft"]));
+    const hasRealSqft = Number.isFinite(sqftRaw) && sqftRaw > 200;
+    const buildingSqft = Math.round(hasRealSqft ? sqftRaw : units * 1600);
     const valuation = Math.round(num(pick(r, ["total_job_valuation", "total_valuation", "building_valuation", "declared_valuation", "estimated_cost", "revised_cost", "reported_cost", "estprojectcost", "const_cost", "initial_cost", "job_cost"])) || 0);
+
+    // Real build-cost sample: declared valuation ÷ real sqft, sanity-bounded.
+    if (valuation > 0 && hasRealSqft) {
+      const bp = valuation / sqftRaw;
+      if (bp >= 60 && bp <= 1500) ppsfSamples.push(bp);
+    }
     const issued = String(pick(r, ["issued_date", "issue_date", "issueddate", "date_issued", "issuance_date", "applied_date", "applieddate", "filing_date", "permit_issue_date"]) ?? "").slice(0, 10);
 
     let address = String(pick(r, ["original_address1", "address", "street_address", "permit_location", "project_name", "originaladdress1"]) ?? "").trim();
@@ -210,13 +222,22 @@ export async function fetchCityDevelopments(src: CitySource, limitOverride?: num
   }
 
   out.sort((a, b) => (a.approvedDate > b.approvedDate ? -1 : 1));
-  return { city: src.city, items: out.slice(0, 400), total: rows.length, columns, url };
+  ppsfSamples.sort((a, b) => a - b);
+  const medianBuildPpsf = ppsfSamples.length >= 5
+    ? Math.round(ppsfSamples[Math.floor(ppsfSamples.length / 2)])
+    : undefined;
+  return {
+    city: src.city, items: out.slice(0, 400), total: rows.length, columns, url,
+    medianBuildPpsf, buildPpsfSamples: ppsfSamples.length,
+  };
 }
 
 export interface LivePermits {
   perCity: CityResult[];
   items: Development[];
   liveCityNames: string[];
+  /** Per-city median declared build $/sf computed from real permits. */
+  liveBuildCosts: Record<string, { ppsf: number; samples: number }>;
 }
 
 /** Fetch every city in parallel; failures degrade to per-city diagnostics. */
@@ -225,8 +246,12 @@ export async function fetchAllCityDevelopments(): Promise<LivePermits> {
   const perCity: CityResult[] = settled.map((r, i) =>
     r.status === "fulfilled"
       ? r.value
-      : { city: CITY_SOURCES[i].city, items: [], total: 0, columns: [], url: CITY_SOURCES[i].url, error: String(r.reason) },
+      : { city: CITY_SOURCES[i].city, items: [], total: 0, columns: [], url: CITY_SOURCES[i].url, buildPpsfSamples: 0, error: String(r.reason) },
   );
   const items = perCity.flatMap((c) => c.items);
-  return { perCity, items, liveCityNames: perCity.filter((c) => c.items.length > 0).map((c) => c.city) };
+  const liveBuildCosts: Record<string, { ppsf: number; samples: number }> = {};
+  for (const c of perCity) {
+    if (c.medianBuildPpsf) liveBuildCosts[c.city] = { ppsf: c.medianBuildPpsf, samples: c.buildPpsfSamples };
+  }
+  return { perCity, items, liveCityNames: perCity.filter((c) => c.items.length > 0).map((c) => c.city), liveBuildCosts };
 }
