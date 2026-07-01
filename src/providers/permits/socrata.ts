@@ -65,24 +65,32 @@ export interface CityResult {
   items: Development[];
   total: number;      // raw rows fetched from the city
   columns: string[];  // the city's actual field names (for on-screen tuning)
+  url: string;        // the exact request URL (for diagnostics)
   error?: string;
 }
 
 export async function fetchCityDevelopments(src: CitySource, limit = 400): Promise<CityResult> {
+  // Minimal query — no assumed column names. Fetch rows, filter in code.
   const params = new URLSearchParams();
-  params.set("$where", "latitude IS NOT NULL");
-  params.set("$order", "issued_date DESC");
   params.set("$limit", String(limit));
   const token = import.meta.env.VITE_SOCRATA_APP_TOKEN as string | undefined;
   if (token) params.set("$$app_token", token);
+  const url = `${src.url}?${params.toString()}`;
 
   let rows: Record<string, unknown>[] = [];
   try {
-    const res = await fetch(`${src.url}?${params.toString()}`, { headers: { Accept: "application/json" } });
-    if (!res.ok) return { items: [], total: 0, columns: [], error: `HTTP ${res.status} from ${src.city} open-data` };
-    rows = (await res.json()) as Record<string, unknown>[];
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { items: [], total: 0, columns: [], url, error: `HTTP ${res.status} · ${body.slice(0, 140)}` };
+    }
+    const data = await res.json();
+    if (!Array.isArray(data)) {
+      return { items: [], total: 0, columns: [], url, error: `Unexpected response: ${JSON.stringify(data).slice(0, 140)}` };
+    }
+    rows = data as Record<string, unknown>[];
   } catch (e) {
-    return { items: [], total: 0, columns: [], error: (e as Error).message };
+    return { items: [], total: 0, columns: [], url, error: `${(e as Error).message} — likely CORS or network block` };
   }
 
   const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
@@ -149,5 +157,5 @@ export async function fetchCityDevelopments(src: CitySource, limit = 400): Promi
     });
   }
 
-  return { items: out.slice(0, 300), total: rows.length, columns };
+  return { items: out.slice(0, 300), total: rows.length, columns, url };
 }

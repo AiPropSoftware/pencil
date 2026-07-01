@@ -168,7 +168,7 @@ export default function MapPage() {
     let cancelled = false;
     fetchCityDevelopments(AUSTIN)
       .then((r) => { if (!cancelled) setLiveResult(r); })
-      .catch((e) => { if (!cancelled) setLiveResult({ items: [], total: 0, columns: [], error: String(e) }); });
+      .catch((e) => { if (!cancelled) setLiveResult({ items: [], total: 0, columns: [], url: "", error: String(e) }); });
     return () => { cancelled = true; };
   }, []);
 
@@ -340,7 +340,12 @@ function LiveStatusChip({ result, status, count }: { result: CityResult | null; 
         <div className="absolute right-0 z-[3000] mt-2 w-80 rounded-md border border-border bg-card p-3 shadow-elevated text-xs">
           <div className="font-medium text-foreground mb-1">Austin open-data permit feed</div>
           <div className="text-muted-foreground">Rows fetched: <span className="text-foreground">{result?.total ?? "…"}</span> · usable: <span className="text-foreground">{count}</span></div>
-          {result?.error && <div className="mt-1 text-destructive">Error: {result.error}</div>}
+          {result?.url && (
+            <a href={result.url} target="_blank" rel="noreferrer" className="mt-1 block break-all text-gold hover:underline">
+              {result.url}
+            </a>
+          )}
+          {result?.error && <div className="mt-1 text-destructive break-words">Error: {result.error}</div>}
           {result && result.columns.length > 0 && (
             <div className="mt-2">
               <div className="text-muted-foreground mb-1">Columns the city returned:</div>
