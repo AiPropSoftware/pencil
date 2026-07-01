@@ -56,17 +56,17 @@ export default function DealAnalyzer() {
     if (Number.isFinite(costPerSqft) && costPerSqft > 0) setInputs((p) => ({ ...p, costPerSqft }));
     if (Number.isFinite(totalSqft) && totalSqft > 0) setInputs((p) => ({ ...p, totalSqft }));
     if (address) setInputs((p) => ({ ...p, address }));
-    // Single-family → build-to-sell (no refi/rental).
+    // Single-family → build-to-sell (no refi/rental; selling costs apply).
     if (productType === "SFH") {
       setStrategy("sell");
-      setInputs((p) => ({ ...p, refiEnabled: false }));
+      setInputs((p) => ({ ...p, refiEnabled: false, applySellingCosts: true }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const chooseStrategy = (s: "sell" | "rent") => {
     setStrategy(s);
-    setInputs((p) => ({ ...p, refiEnabled: s === "rent" }));
+    setInputs((p) => ({ ...p, refiEnabled: s === "rent", applySellingCosts: s === "sell" }));
   };
 
   const r = React.useMemo(() => calcDeal(inputs), [inputs]);
@@ -176,8 +176,15 @@ export default function DealAnalyzer() {
                   <NumericField label="Construction rate" value={inputs.constructionRate} onChange={(v) => set("constructionRate", v)} suffix="%" percent />
                   <NumericField label="Months to build" value={inputs.monthsToBuild} onChange={(v) => set("monthsToBuild", v)} suffix="mo" />
                   <NumericField label="LTC" value={inputs.ltcPct} onChange={(v) => set("ltcPct", v)} suffix="%" percent />
-                  <NumericField label="ARV (after-repair value)" value={inputs.arv} onChange={(v) => set("arv", v)} prefix="$" className="sm:col-span-2" />
+                  <NumericField label={strategy === "sell" ? "Sale price (ARV)" : "ARV (after-repair value)"} value={inputs.arv} onChange={(v) => set("arv", v)} prefix="$" className="sm:col-span-2" />
                 </div>
+                {strategy === "sell" && (
+                  <div className="grid sm:grid-cols-2 gap-4 rounded-md border border-border bg-secondary/30 p-4">
+                    <div className="sm:col-span-2 stat-label">Cost of selling</div>
+                    <NumericField label="Realtor commission" value={inputs.salesCommissionPct} onChange={(v) => set("salesCommissionPct", v)} suffix="%" percent hint="Total agent commission on the sale price." />
+                    <NumericField label="Sale closing" value={inputs.saleClosingPct} onChange={(v) => set("saleClosingPct", v)} suffix="%" percent hint="Seller-side title, escrow, transfer tax." />
+                  </div>
+                )}
               </TabsContent>
 
               {strategy === "rent" && (
@@ -286,7 +293,10 @@ function Results({ inputs, r, strategy }: { inputs: DealInputs; r: DealResults; 
           <CardHeader><CardTitle className="text-lg">On sale</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             <Row label="Sale price (ARV)" value={fmtMoney(inputs.arv)} />
-            <Row label="All-in cost" value={fmtMoney(r.allInCost)} />
+            <Row label="Selling costs" value={fmtMoney(-r.sellingCosts)} />
+            <Row label="Net sale proceeds" value={fmtMoney(r.netSaleProceeds)} />
+            <Row label="All-in cost" value={fmtMoney(-r.allInCost)} />
+            <Separator className="my-2" />
             <Row label="Projected profit" value={fmtMoney(r.projectedProfit)} accent />
             <Row label="Profit margin" value={fmtPct(r.profitMargin)} />
             <Row label="Return on cash" value={fmtPct(r.cashRequired > 0 ? r.projectedProfit / r.cashRequired : 0)} accent />

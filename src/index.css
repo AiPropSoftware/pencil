@@ -82,7 +82,7 @@
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
   h1, h2, h3, h4 {
-    @apply font-display tracking-tight;
+    @apply font-display font-semibold tracking-tight;
   }
   /* Subtle paper grain */
   body::before {

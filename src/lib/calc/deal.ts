@@ -17,7 +17,12 @@ export interface DealInputs {
   constructionRate: number;    // annual rate, decimal
   monthsToBuild: number;
   ltcPct: number;              // loan-to-cost on construction loan, decimal
-  arv: number;                 // after-repair / completed value
+  arv: number;                 // after-repair / completed value (sale price)
+
+  // Disposition (build-to-sell) — cost of actually selling the finished home
+  applySellingCosts: boolean;  // true in build-to-sell mode
+  salesCommissionPct: number;  // realtor commission on the sale price, decimal
+  saleClosingPct: number;      // seller-side closing on the sale price, decimal
 
   // Refi
   refiEnabled: boolean;
@@ -53,6 +58,10 @@ export const defaultDeal: DealInputs = {
   ltcPct: 0.80,
   arv: 1_250_000,
 
+  applySellingCosts: false,
+  salesCommissionPct: 0.05,
+  saleClosingPct: 0.01,
+
   refiEnabled: true,
   refiLtvPct: 0.75,
   refiClosingPct: 0.02,
@@ -83,7 +92,9 @@ export interface DealResults {
   totalCarry: number;
   allInCost: number;
   cashRequired: number;
-  projectedProfit: number;        // ARV - all-in
+  sellingCosts: number;           // commission + sale closing (sell mode only)
+  netSaleProceeds: number;        // ARV - sellingCosts
+  projectedProfit: number;        // net proceeds - all-in
   profitMargin: number;           // profit / all-in
 
   // Refi (zeros when disabled)
@@ -146,7 +157,9 @@ export function calcDeal(d: DealInputs): DealResults {
 
   const allInCost = totalDevCostBeforeFinancing + lenderFees + totalCarry;
   const cashRequired = allInCost - constructionLoan;
-  const projectedProfit = d.arv - allInCost;
+  const sellingCosts = d.applySellingCosts ? d.arv * (d.salesCommissionPct + d.saleClosingPct) : 0;
+  const netSaleProceeds = d.arv - sellingCosts;
+  const projectedProfit = netSaleProceeds - allInCost;
   const profitMargin = allInCost > 0 ? projectedProfit / allInCost : 0;
 
   let refi = { ...ZEROS };
@@ -193,6 +206,8 @@ export function calcDeal(d: DealInputs): DealResults {
     totalCarry,
     allInCost,
     cashRequired,
+    sellingCosts,
+    netSaleProceeds,
     projectedProfit,
     profitMargin,
     ...refi,
