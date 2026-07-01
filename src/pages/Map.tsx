@@ -24,10 +24,11 @@ import { scoreOpportunity, buildPpsf } from "@/lib/underwrite/opportunity";
 import { setLiveBuildCosts, getLiveBuildCost } from "@/lib/underwrite/liveCosts";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { toast } from "sonner";
+import { govLinksFor } from "@/data/govLinks";
 import {
   Search, X, ArrowRight, Building2, CalendarDays, Ruler, Layers3, TrendingUp,
   ExternalLink, HardHat, PencilRuler, Plus, Sparkles, Globe, Home, Hammer,
-  Heart, Link2,
+  Heart, Link2, Landmark, ScrollText,
 } from "lucide-react";
 
 const US_CENTER: [number, number] = [39.5, -98.35];
@@ -180,16 +181,24 @@ export default function MapPage() {
   // Live multi-city permit feeds.
   const [live, setLive] = React.useState<LivePermits | null>(null);
 
+  const [lastUpdated, setLastUpdated] = React.useState<number | null>(null);
+
+  // Genuinely self-updating: refetch every 5 minutes so the LIVE dot is honest.
   React.useEffect(() => {
     let cancelled = false;
-    fetchAllCityDevelopments()
-      .then((r) => {
-        if (cancelled) return;
-        setLiveBuildCosts(r.liveBuildCosts); // real permit-derived build $/sf feeds the X-ray
-        setLive(r);
-      })
-      .catch(() => { if (!cancelled) setLive({ perCity: [], items: [], liveCityNames: [], liveBuildCosts: {} }); });
-    return () => { cancelled = true; };
+    const load = () => {
+      fetchAllCityDevelopments()
+        .then((r) => {
+          if (cancelled) return;
+          setLiveBuildCosts(r.liveBuildCosts); // real permit-derived build $/sf feeds the X-ray
+          setLive(r);
+          setLastUpdated(Date.now());
+        })
+        .catch(() => { if (!cancelled) setLive((prev) => prev ?? { perCity: [], items: [], liveCityNames: [], liveBuildCosts: {} }); });
+    };
+    load();
+    const timer = setInterval(load, 5 * 60_000);
+    return () => { cancelled = true; clearInterval(timer); };
   }, []);
 
   React.useEffect(() => { setVisibleCount(PAGE); }, [place, layer, typeFilter, kindFilter, dealsOnly, watchOnly]);
@@ -317,7 +326,7 @@ export default function MapPage() {
           >
             <Heart className={`h-4 w-4 ${watchOnly ? "text-gold fill-current" : ""}`} /> Watchlist{watched.size > 0 ? ` (${watched.size})` : ""}
           </button>
-          <LiveStatusChip live={live} />
+          <LiveStatusChip live={live} lastUpdated={lastUpdated} />
         </div>
         {/* Filter chips */}
         <div className="container pb-3 flex flex-wrap gap-1.5">
@@ -391,6 +400,11 @@ export default function MapPage() {
             <FlyToTarget target={fly} />
             <Clusters pins={pins} />
           </MapContainer>
+          {(live?.liveCityNames.length ?? 0) > 0 && (
+            <div className="absolute top-3 left-3 z-[1000] flex items-center gap-2 rounded-md border border-border bg-card/95 px-2.5 py-1.5 text-[11px] font-medium text-foreground/80 shadow-card backdrop-blur">
+              <PulsingDot /> LIVE · self-updating
+            </div>
+          )}
           <div className="absolute bottom-3 left-3 z-[1000] rounded-md border border-border bg-card/95 backdrop-blur px-3 py-2 shadow-card">
             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
               {(layer === "construction" ? PRODUCT_TYPES : LISTING_KINDS).map((t) => (
@@ -428,6 +442,16 @@ function toggleSet<T>(setter: React.Dispatch<React.SetStateAction<Set<T>>>, v: T
   setter((prev) => { const n = new Set(prev); n.has(v) ? n.delete(v) : n.add(v); return n; });
 }
 
+/** Slow-pulsing live indicator — backed by a real 5-minute refresh cycle. */
+function PulsingDot({ tone = "bg-gold" }: { tone?: string }) {
+  return (
+    <span className="relative flex h-2 w-2">
+      <span className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 [animation-duration:2.4s] ${tone}`} />
+      <span className={`relative inline-flex h-2 w-2 rounded-full ${tone}`} />
+    </span>
+  );
+}
+
 /** Fly the map to a picked property (rail click / deep link). */
 function FlyToTarget({ target }: { target: { lat: number; lng: number } | null }) {
   const map = useMap();
@@ -437,7 +461,7 @@ function FlyToTarget({ target }: { target: { lat: number; lng: number } | null }
   return null;
 }
 
-function LiveStatusChip({ live }: { live: LivePermits | null }) {
+function LiveStatusChip({ live, lastUpdated }: { live: LivePermits | null; lastUpdated: number | null }) {
   const [open, setOpen] = React.useState(false);
   const total = live?.items.length ?? 0;
   const cities = live?.liveCityNames ?? [];
@@ -452,13 +476,20 @@ function LiveStatusChip({ live }: { live: LivePermits | null }) {
         onClick={() => setOpen((v) => !v)}
         className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-2 text-xs text-muted-foreground hover:text-foreground"
       >
-        <span className={`h-2 w-2 rounded-full ${total > 0 ? "bg-gold" : !live ? "bg-muted-foreground/50" : "bg-destructive/60"}`} />
+        {total > 0 ? <PulsingDot /> : <span className={`h-2 w-2 rounded-full ${!live ? "bg-muted-foreground/50" : "bg-destructive/60"}`} />}
         {label}
         <span className="text-muted-foreground/60">ⓘ</span>
       </button>
       {open && (
         <div className="absolute right-0 z-[3000] mt-2 w-96 max-h-[70vh] overflow-y-auto rounded-md border border-border bg-card p-3 shadow-elevated text-xs">
-          <div className="font-medium text-foreground mb-2">Live open-data permit feeds</div>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="font-medium text-foreground">Live open-data permit feeds</span>
+            <span className="text-muted-foreground">
+              {lastUpdated
+                ? `refreshed ${new Date(lastUpdated).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                : "…"} · auto every 5 min
+            </span>
+          </div>
           {!live && <div className="text-muted-foreground">Loading…</div>}
           {live?.perCity.map((c) => (
             <div key={c.city} className="mb-2 border-b border-border/60 pb-2 last:mb-0 last:border-0 last:pb-0">
@@ -706,6 +737,31 @@ function PpsfChart({ city }: { city: string }) {
 }
 
 // ── Construction panel ──────────────────────────────────────────────────────
+/** One-click city/county resources: permit portal, zoning code, parcel GIS. */
+function CityResources({ city, state }: { city: string; state: string }) {
+  const g = govLinksFor(city, state);
+  const Btn = ({ href, icon: Icon, children }: { href: string; icon: React.ComponentType<{ className?: string }>; children: React.ReactNode }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground transition-colors hover:bg-secondary"
+    >
+      <Icon className="h-3.5 w-3.5 text-gold" /> {children}
+      <ExternalLink className="h-3 w-3 text-muted-foreground" />
+    </a>
+  );
+  return (
+    <Section title={`${city} resources`} tag={g.official ? "official portals" : "web search"}>
+      <div className="flex flex-wrap gap-1.5">
+        <Btn href={g.permits} icon={Landmark}>Apply for permits</Btn>
+        <Btn href={g.zoning} icon={ScrollText}>Zoning code</Btn>
+        {g.gis && <Btn href={g.gis} icon={Globe}>Parcel / GIS map</Btn>}
+      </div>
+    </Section>
+  );
+}
+
 function ShareWatchRow({ id, watched, onWatch }: { id: string; watched: boolean; onWatch: () => void }) {
   return (
     <div className="mt-4 flex gap-2">
@@ -789,6 +845,8 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
             { label: "Target completion", date: permits.targetCompletion, done: dev.status === "Completed" },
           ]} />
         </Section>
+
+        <CityResources city={dev.city} state={dev.state} />
       </div>
     </Drawer>
   );
@@ -843,6 +901,8 @@ function ListingPanel({ listing: l, watched, onWatch, onClose }: { listing: List
             ))}
           </div>
         </Section>
+
+        <CityResources city={l.city} state={l.state} />
 
         <InlineUnderwrite city={l.city} type={l.productTypeIfBuilt} buildableSqft={l.buildableSqft} initialLand={l.listPrice} address={`${l.address}, ${l.city}, ${l.state}`} />
 
