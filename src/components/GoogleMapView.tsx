@@ -8,7 +8,7 @@
  */
 import * as React from "react";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
-import { loadGoogleMaps } from "@/lib/googleMaps";
+import { loadGoogleMaps, onGoogleAuthFailure } from "@/lib/googleMaps";
 
 export interface GPin {
   id: string;
@@ -41,23 +41,35 @@ const clusterRenderer = {
 };
 
 export function GoogleMapView({
-  apiKey, pins, fly, place, fitPoints,
+  apiKey, pins, fly, place, fitPoints, onFailed,
 }: {
   apiKey: string;
   pins: GPin[];
   fly: { lat: number; lng: number } | null;
   place: string;
   fitPoints: { lat: number; lng: number }[];
+  /** Called once if Google's engine can't run (script blocked or key rejected). */
+  onFailed?: () => void;
 }) {
   const ref = React.useRef<HTMLDivElement>(null);
   const mapRef = React.useRef<any>(null);
   const clusterRef = React.useRef<MarkerClusterer | null>(null);
   const [ready, setReady] = React.useState(false);
   const [failed, setFailed] = React.useState(false);
+  const onFailedRef = React.useRef(onFailed);
+  onFailedRef.current = onFailed;
 
   // Init once.
   React.useEffect(() => {
     let cancelled = false;
+    let reported = false;
+    const fail = () => {
+      if (cancelled || reported) return;
+      reported = true;
+      setFailed(true);
+      onFailedRef.current?.();
+    };
+    const offAuth = onGoogleAuthFailure(fail);
     loadGoogleMaps(apiKey)
       .then((g) => {
         if (cancelled || !ref.current || mapRef.current) return;
@@ -72,8 +84,8 @@ export function GoogleMapView({
         });
         setReady(true);
       })
-      .catch(() => { if (!cancelled) setFailed(true); });
-    return () => { cancelled = true; };
+      .catch(fail);
+    return () => { cancelled = true; offAuth(); };
   }, [apiKey]);
 
   // Markers + clustering follow the pin set.

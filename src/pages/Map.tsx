@@ -183,7 +183,7 @@ export default function MapPage() {
   const [selected, setSelected] = React.useState<Selection>(null);
   const [dealsOnly, setDealsOnly] = React.useState(false);
   const [fly, setFly] = React.useState<{ lat: number; lng: number } | null>(null);
-  const [basemap, setBasemap] = React.useState<"streets" | "satellite" | "google">("streets");
+  const [basemap, setBasemap] = React.useState<"streets" | "satellite" | "google">("google");
 
   // Watchlist — hearts persist across visits.
   const { ids: watched, toggle: toggleWatch } = useWatchlist();
@@ -481,6 +481,10 @@ export default function MapPage() {
               fly={fly}
               place={place}
               fitPoints={activeList.map((p) => ({ lat: p.lat, lng: p.lng }))}
+              onFailed={() => {
+                setBasemap("streets");
+                toast.error("Google view unavailable — the key's billing or website restriction is blocking it. Switched to Map view.");
+              }}
             />
           ) : (
             <MapContainer center={US_CENTER} zoom={US_ZOOM} scrollWheelZoom className="h-full w-full" style={{ background: "#eae5db" }}>
@@ -510,6 +514,12 @@ export default function MapPage() {
           {/* Basemap toggle — flip to real aerial imagery to verify any pin. */}
           <div className="absolute top-3 right-3 z-[1000] flex overflow-hidden rounded-md border border-border bg-card/95 shadow-card backdrop-blur text-[11px] font-medium">
             <button
+              onClick={() => setBasemap("google")}
+              className={`px-2.5 py-1.5 ${basemap === "google" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Google
+            </button>
+            <button
               onClick={() => setBasemap("streets")}
               className={`px-2.5 py-1.5 ${basemap === "streets" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
             >
@@ -520,12 +530,6 @@ export default function MapPage() {
               className={`px-2.5 py-1.5 ${basemap === "satellite" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
             >
               Satellite
-            </button>
-            <button
-              onClick={() => setBasemap("google")}
-              className={`px-2.5 py-1.5 ${basemap === "google" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              Google
             </button>
           </div>
           <div className="absolute bottom-3 left-3 z-[1000] rounded-md border border-border bg-card/95 backdrop-blur px-3 py-2 shadow-card">

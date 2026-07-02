@@ -10,16 +10,43 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 let loader: Promise<any> | null = null;
+const authListeners = new Set<() => void>();
+
+/**
+ * Subscribe to Google's key-rejection signal (billing off, API not enabled,
+ * or the site missing from the key's website restriction). Returns an
+ * unsubscribe function.
+ */
+export function onGoogleAuthFailure(cb: () => void): () => void {
+  authListeners.add(cb);
+  return () => { authListeners.delete(cb); };
+}
 
 export function loadGoogleMaps(key: string): Promise<any> {
   const w = window as any;
-  if (w.google?.maps) return Promise.resolve(w.google);
+  if (w.google?.maps?.Map) return Promise.resolve(w.google);
   if (loader) return loader;
+  // Google invokes this global when the key is rejected after the script loads.
+  w.gm_authFailure = () => {
+    // eslint-disable-next-line no-console
+    console.warn("[Pencil] Google Maps key rejected — check billing + website restriction in Google Cloud → Credentials");
+    authListeners.forEach((cb) => cb());
+  };
   loader = new Promise((resolve, reject) => {
     const s = document.createElement("script");
     s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&loading=async`;
     s.async = true;
-    s.onload = () => resolve(w.google);
+    // With loading=async the script only bootstraps importLibrary — the actual
+    // classes (Map, Marker, Geocoder) exist only after their libraries load.
+    s.onload = () => {
+      Promise.all([
+        w.google.maps.importLibrary("maps"),
+        w.google.maps.importLibrary("marker"),
+        w.google.maps.importLibrary("geocoding"),
+      ])
+        .then(() => resolve(w.google))
+        .catch((e) => { loader = null; reject(e); });
+    };
     s.onerror = () => { loader = null; reject(new Error("Google Maps JS failed to load")); };
     document.head.appendChild(s);
   });
