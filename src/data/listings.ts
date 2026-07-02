@@ -44,6 +44,8 @@ export interface Listing {
   productTypeIfBuilt: ProductType; // what a developer would build here
   buildableSqft: number;           // sellable sqft of the new build
   priceHistory: PricePoint[];
+  /** Real listing photo (MLS feed) — demo listings have none. */
+  photo?: string;
 }
 
 function hash(s: string): number {
@@ -66,7 +68,7 @@ const STREETS = [
   "Whitfield", "Yale", "Zephyr", "Amherst", "Beckett", "Colby", "Denton",
 ];
 
-function buildableFor(kind: ListingKind, lotSqft: number): { type: ProductType; sqft: number } {
+export function buildableFor(kind: ListingKind, lotSqft: number): { type: ProductType; sqft: number } {
   switch (kind) {
     case "Multifamily": return { type: "Small multi", sqft: Math.round(lotSqft * 1.1) };
     case "Vacant land": return { type: "SFH", sqft: Math.min(3400, Math.round(lotSqft * 0.5)) };

@@ -20,6 +20,9 @@ import {
 } from "@/data/developments";
 import { listings, LISTING_KINDS, LISTING_COLOR, type Listing, type ListingKind } from "@/data/listings";
 import { fetchAllCityDevelopments, type LivePermits } from "@/providers/permits/socrata";
+import { fetchSoldRates } from "@/providers/sold/socrataSales";
+import { setLiveSaleRates } from "@/lib/underwrite/liveSaleRates";
+import { fetchMlsListings } from "@/providers/listings/mls";
 import { scoreOpportunity, buildPpsf, PLAUSIBLE_MARGIN_CAP } from "@/lib/underwrite/opportunity";
 import { setLiveBuildCosts, getLiveBuildCost } from "@/lib/underwrite/liveCosts";
 import { useWatchlist } from "@/hooks/useWatchlist";
@@ -182,12 +185,23 @@ export default function MapPage() {
   const [live, setLive] = React.useState<LivePermits | null>(null);
 
   const [lastUpdated, setLastUpdated] = React.useState<number | null>(null);
+  const [mlsListings, setMlsListings] = React.useState<Listing[]>([]);
 
   // Genuinely self-updating: refetch every 5 minutes so the LIVE dot is honest.
   React.useEffect(() => {
     let cancelled = false;
     const load = () => {
-      fetchAllCityDevelopments()
+      // Recorded-sales medians land in the store BEFORE permits render, so the
+      // X-ray's sell-side uses real deeds where cities publish them.
+      const sold = fetchSoldRates()
+        .then((rates) => {
+          if (cancelled) return;
+          setLiveSaleRates(rates.filter((r) => r.ppsf != null).map((r) => ({ city: r.city, ppsf: r.ppsf as number, samples: r.samples })));
+          // eslint-disable-next-line no-console
+          console.info("[Pencil] recorded-sales rates:", rates);
+        })
+        .catch(() => {});
+      Promise.allSettled([sold]).then(() => fetchAllCityDevelopments()
         .then((r) => {
           if (cancelled) return;
           setLiveBuildCosts(r.liveBuildCosts); // real permit-derived build $/sf feeds the X-ray
@@ -201,12 +215,28 @@ export default function MapPage() {
             columns: c.items.length === 0 ? c.columns.join(",") : undefined,
           })));
         })
-        .catch(() => { if (!cancelled) setLive((prev) => prev ?? { perCity: [], items: [], liveCityNames: [], liveBuildCosts: {} }); });
+        .catch(() => { if (!cancelled) setLive((prev) => prev ?? { perCity: [], items: [], liveCityNames: [], liveBuildCosts: {} }); }));
     };
     load();
     const timer = setInterval(load, 5 * 60_000);
+
+    // MLS listings (activates the moment Bridge credentials exist server-side).
+    fetchMlsListings().then(({ listings: mls, status }) => {
+      if (cancelled) return;
+      // eslint-disable-next-line no-console
+      console.info("[Pencil] MLS feed:", status);
+      if (mls.length > 0) setMlsListings(mls);
+    }).catch(() => {});
+
     return () => { cancelled = true; clearInterval(timer); };
   }, []);
+
+  // Real MLS listings replace demo listings in the cities they cover.
+  const allListings = React.useMemo(() => {
+    if (mlsListings.length === 0) return listings;
+    const liveCities = new Set(mlsListings.map((l) => l.city));
+    return [...listings.filter((l) => !liveCities.has(l.city)), ...mlsListings];
+  }, [mlsListings]);
 
   React.useEffect(() => { setVisibleCount(PAGE); }, [place, layer, typeFilter, kindFilter, dealsOnly, watchOnly]);
 
@@ -245,14 +275,14 @@ export default function MapPage() {
       deepLinkDone.current = true;
       return;
     }
-    const l = listings.find((x) => x.id === pin);
+    const l = allListings.find((x) => x.id === pin);
     if (l) {
       setSelected({ kind: "listing", data: l });
       setFly({ lat: l.lat, lng: l.lng });
       deepLinkDone.current = true;
     }
-    // If not found yet, retry when live data lands (effect re-runs on allDevs).
-  }, [allDevs]);
+    // If not found yet, retry when live data lands (effect re-runs on data).
+  }, [allDevs, allListings]);
 
   const matchesPlace = (s: string) => place.trim() === "" || s.toLowerCase().includes(place.trim().toLowerCase());
 
@@ -264,12 +294,12 @@ export default function MapPage() {
     [allDevs, typeFilter, place, watchOnly, watched],
   );
   const listingMatches = React.useMemo(
-    () => listings.filter((l) =>
+    () => allListings.filter((l) =>
       kindFilter.has(l.kind) &&
       matchesPlace(`${l.address} ${l.city} ${l.state} ${l.kind}`) &&
       (!dealsOnly || listingOpportunity(l).atPrice?.isDeal) &&
       (!watchOnly || watched.has(l.id))),
-    [kindFilter, place, dealsOnly, watchOnly, watched],
+    [allListings, kindFilter, place, dealsOnly, watchOnly, watched],
   );
 
   // Auto-finder: score every listing and float the best deals to the top.
@@ -563,17 +593,21 @@ function ListingCard({ l, selected, watched, onWatch, onClick }: { l: Listing; s
   const deal = opp.atPrice?.isDeal;
   return (
     <div onClick={onClick} className={`w-full cursor-pointer text-left rounded-md border bg-card overflow-hidden transition-colors hover:bg-secondary/40 ${selected ? "border-gold ring-1 ring-gold/40" : "border-border"}`}>
-      <div className="p-2.5">
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-display text-lg">{fmtMoney(l.listPrice)}</span>
-          <span className="flex items-center gap-1">
-            <MarginBadge margin={opp.atPrice?.margin ?? 0} deal={!!deal} />
-            <WatchHeart watched={watched} onWatch={onWatch} />
-          </span>
-        </div>
-        <div className="text-sm truncate">{l.address}</div>
-        <div className="text-xs text-muted-foreground">
-          {l.city}, {l.state} · {l.kind}{l.beds != null ? ` · ${l.beds}bd/${l.baths}ba` : ""} · {fmtNumber(l.lotSqft)} sf lot
+      <div className="flex gap-3 p-2.5">
+        {l.photo && <img src={l.photo} alt="" className="h-16 w-20 rounded object-cover flex-none bg-secondary" loading="lazy" />}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-display text-lg">{fmtMoney(l.listPrice)}</span>
+            <span className="flex items-center gap-1">
+              {l.id.startsWith("mls-") && <span className="rounded-full bg-gold/15 px-1.5 text-[10px] font-medium text-gold">LIVE</span>}
+              <MarginBadge margin={opp.atPrice?.margin ?? 0} deal={!!deal} />
+              <WatchHeart watched={watched} onWatch={onWatch} />
+            </span>
+          </div>
+          <div className="text-sm truncate">{l.address}</div>
+          <div className="text-xs text-muted-foreground">
+            {l.city}, {l.state} · {l.kind}{l.beds != null ? ` · ${l.beds}bd/${l.baths}ba` : ""} · {fmtNumber(l.lotSqft)} sf lot
+          </div>
         </div>
       </div>
     </div>
@@ -808,7 +842,7 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
 
         <InlineUnderwrite city={dev.city} type={dev.productType} buildableSqft={dev.buildingSqft} initialLand={Math.round(devOpportunity(dev).maxLandPrice)} address={`${dev.name}, ${dev.city}, ${dev.state}`} />
 
-        <Section title="Area $/sqft trend" tag="modeled from sold comps">
+        <Section title="Area $/sqft trend" tag={ppsf.liveSamples ? `median of ${ppsf.liveSamples.toLocaleString("en-US")} recorded sales` : "modeled from sold comps"}>
           <div className="font-display text-2xl text-gold">${ppsf.current}/sf</div>
           <div className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><TrendingUp className="h-3 w-3" /> ${ppsf.low}–${ppsf.high} range since {ppsf.since}</div>
           <PpsfChart city={dev.city} />
@@ -851,6 +885,12 @@ function ListingPanel({ listing: l, watched, onWatch, onClose }: { listing: List
 
   return (
     <Drawer onClose={onClose}>
+      {l.photo && (
+        <div className="relative h-48 w-full bg-secondary">
+          <img src={l.photo} alt="" className="h-full w-full object-cover" loading="lazy" />
+          <span className="absolute bottom-2 right-3 text-[10px] text-white/85">real listing photo · MLS</span>
+        </div>
+      )}
       <div className="p-6">
         <div className="flex items-start justify-between">
           <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-white" style={{ background: LISTING_COLOR[l.kind] }}>{l.kind}</span>

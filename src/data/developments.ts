@@ -13,6 +13,8 @@ export type ProductType =
 
 export type DevStatus = "Approved" | "Permitted" | "Under construction" | "Completed";
 
+import { getLiveSaleRate } from "@/lib/underwrite/liveSaleRates";
+
 export interface Development {
   id: string;
   name: string;
@@ -370,9 +372,14 @@ export interface PpsfPoint {
   high: number;
 }
 
-/** Rolling new-construction $/sqft by quarter with a confidence band. */
+/** Rolling new-construction $/sqft by quarter with a confidence band.
+ * When real recorded sales exist for the city (liveSaleRates), the curve is
+ * rebased so its current value IS the recorded-sales median. */
 export function metroTrend(city: string): PpsfPoint[] {
-  const base = METRO_CENTERS[city]?.ppsf ?? 350;
+  const curated = METRO_CENTERS[city]?.ppsf ?? 350;
+  const live = getLiveSaleRate(city);
+  const lastFactor = 0.8 + (QUARTERS.length - 1) * 0.029;
+  const base = live ? live.ppsf / lastFactor : curated;
   return QUARTERS.map((quarter, i) => {
     const ppsf = Math.round(base * (0.8 + i * 0.029));
     return { quarter, ppsf, low: Math.round(ppsf * 0.87), high: Math.round(ppsf * 1.13) };
@@ -384,6 +391,8 @@ export interface PpsfSummary {
   low: number;
   high: number;
   since: string;
+  /** Present when `current` is a median of real recorded sales. */
+  liveSamples?: number;
 }
 
 export function ppsfSummary(city: string): PpsfSummary {
@@ -391,7 +400,14 @@ export function ppsfSummary(city: string): PpsfSummary {
   const cur = t[t.length - 1];
   const thresh = cur.ppsf * 0.92;
   const idx = t.findIndex((p) => p.ppsf >= thresh);
-  return { current: cur.ppsf, low: cur.low, high: cur.high, since: QUARTERS[idx < 0 ? 0 : idx] };
+  const live = getLiveSaleRate(city);
+  return {
+    current: live?.ppsf ?? cur.ppsf,
+    low: cur.low,
+    high: cur.high,
+    since: QUARTERS[idx < 0 ? 0 : idx],
+    liveSamples: live?.samples,
+  };
 }
 
 // ── Renderings / photos ─────────────────────────────────────────────────────
