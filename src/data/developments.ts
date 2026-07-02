@@ -58,6 +58,28 @@ export interface MetroCenter {
   lng: number;
   state: string;
   ppsf: number; // headline new-construction $/sqft for the metro
+  /** Safe direction(s) to scatter demo pins toward (away from water):
+   *  compass letters ("NW", "E"…) force that quadrant; "NS"/"EW" shrink the
+   *  cross axis for corridor cities between two waters. */
+  coast?: string;
+  /** Optional scatter shrink for tight peninsulas/islands. */
+  scatterScale?: number;
+}
+
+/** Constrain a scatter offset to a metro's safe land side. */
+export function safeOffset(m: MetroCenter, latOff: number, lngOff: number): { latOff: number; lngOff: number } {
+  const scale = m.scatterScale ?? 1;
+  let la = latOff * scale;
+  let ln = lngOff * scale;
+  const c = m.coast;
+  if (!c) return { latOff: la, lngOff: ln };
+  if (c === "NS") return { latOff: la, lngOff: ln * 0.25 };
+  if (c === "EW") return { latOff: la * 0.25, lngOff: ln };
+  if (c.includes("N")) la = Math.abs(la);
+  if (c.includes("S")) la = -Math.abs(la);
+  if (c.includes("E")) ln = Math.abs(ln);
+  if (c.includes("W")) ln = -Math.abs(ln);
+  return { latOff: la, lngOff: ln };
 }
 
 export const METRO_CENTERS: Record<string, MetroCenter> = {
@@ -68,33 +90,33 @@ export const METRO_CENTERS: Record<string, MetroCenter> = {
   Denver: { lat: 39.74, lng: -104.99, state: "CO", ppsf: 520 },
   Nashville: { lat: 36.16, lng: -86.78, state: "TN", ppsf: 420 },
   Atlanta: { lat: 33.75, lng: -84.39, state: "GA", ppsf: 360 },
-  Tampa: { lat: 27.95, lng: -82.46, state: "FL", ppsf: 360 },
-  Miami: { lat: 25.76, lng: -80.19, state: "FL", ppsf: 800 },
+  Tampa: { lat: 27.95, lng: -82.46, state: "FL", ppsf: 360, coast: "E" },
+  Miami: { lat: 25.76, lng: -80.19, state: "FL", ppsf: 800, coast: "NW", scatterScale: 0.8 },
   Charlotte: { lat: 35.23, lng: -80.84, state: "NC", ppsf: 360 },
   Raleigh: { lat: 35.78, lng: -78.64, state: "NC", ppsf: 360 },
-  Seattle: { lat: 47.61, lng: -122.33, state: "WA", ppsf: 720 },
+  Seattle: { lat: 47.61, lng: -122.33, state: "WA", ppsf: 720, coast: "NS" },
   Portland: { lat: 45.51, lng: -122.68, state: "OR", ppsf: 560 },
   Columbus: { lat: 39.96, lng: -82.99, state: "OH", ppsf: 300 },
-  "Salt Lake City": { lat: 40.76, lng: -111.89, state: "UT", ppsf: 470 },
+  "Salt Lake City": { lat: 40.76, lng: -111.89, state: "UT", ppsf: 470, coast: "SE" },
   Boise: { lat: 43.62, lng: -116.20, state: "ID", ppsf: 380 },
   "Las Vegas": { lat: 36.17, lng: -115.14, state: "NV", ppsf: 340 },
 
   // ── Nationwide coverage ──────────────────────────────────────────────────
-  "San Francisco": { lat: 37.77, lng: -122.42, state: "CA", ppsf: 950 },
+  "San Francisco": { lat: 37.77, lng: -122.42, state: "CA", ppsf: 950, coast: "S", scatterScale: 0.5 },
   "San Jose": { lat: 37.34, lng: -121.89, state: "CA", ppsf: 800 },
-  Oakland: { lat: 37.80, lng: -122.27, state: "CA", ppsf: 720 },
+  Oakland: { lat: 37.80, lng: -122.27, state: "CA", ppsf: 720, coast: "E" },
   Sacramento: { lat: 38.58, lng: -121.49, state: "CA", ppsf: 480 },
   "Los Angeles": { lat: 34.05, lng: -118.24, state: "CA", ppsf: 720 },
-  "San Diego": { lat: 32.72, lng: -117.16, state: "CA", ppsf: 700 },
-  "Long Beach": { lat: 33.77, lng: -118.19, state: "CA", ppsf: 650 },
+  "San Diego": { lat: 32.72, lng: -117.16, state: "CA", ppsf: 700, coast: "E" },
+  "Long Beach": { lat: 33.77, lng: -118.19, state: "CA", ppsf: 650, coast: "N" },
   Irvine: { lat: 33.68, lng: -117.83, state: "CA", ppsf: 700 },
   Riverside: { lat: 33.95, lng: -117.40, state: "CA", ppsf: 400 },
   Fresno: { lat: 36.74, lng: -119.79, state: "CA", ppsf: 340 },
   Bakersfield: { lat: 35.37, lng: -119.02, state: "CA", ppsf: 300 },
-  Honolulu: { lat: 21.31, lng: -157.86, state: "HI", ppsf: 800 },
-  Anchorage: { lat: 61.22, lng: -149.90, state: "AK", ppsf: 320 },
+  Honolulu: { lat: 21.31, lng: -157.86, state: "HI", ppsf: 800, coast: "N", scatterScale: 0.5 },
+  Anchorage: { lat: 61.22, lng: -149.90, state: "AK", ppsf: 320, coast: "NE" },
   Spokane: { lat: 47.66, lng: -117.43, state: "WA", ppsf: 320 },
-  Tacoma: { lat: 47.25, lng: -122.44, state: "WA", ppsf: 380 },
+  Tacoma: { lat: 47.25, lng: -122.44, state: "WA", ppsf: 380, coast: "S" },
   Salem: { lat: 44.94, lng: -123.04, state: "OR", ppsf: 360 },
   Eugene: { lat: 44.05, lng: -123.09, state: "OR", ppsf: 360 },
   Reno: { lat: 39.53, lng: -119.81, state: "NV", ppsf: 400 },
@@ -114,18 +136,18 @@ export const METRO_CENTERS: Record<string, MetroCenter> = {
   "Fort Worth": { lat: 32.75, lng: -97.33, state: "TX", ppsf: 300 },
   "El Paso": { lat: 31.76, lng: -106.49, state: "TX", ppsf: 220 },
   Plano: { lat: 33.02, lng: -96.70, state: "TX", ppsf: 350 },
-  "Corpus Christi": { lat: 27.80, lng: -97.40, state: "TX", ppsf: 240 },
+  "Corpus Christi": { lat: 27.80, lng: -97.40, state: "TX", ppsf: 240, coast: "NW" },
   "Oklahoma City": { lat: 35.47, lng: -97.52, state: "OK", ppsf: 230 },
   Tulsa: { lat: 36.15, lng: -95.99, state: "OK", ppsf: 230 },
   "Little Rock": { lat: 34.75, lng: -92.29, state: "AR", ppsf: 220 },
-  "New Orleans": { lat: 29.95, lng: -90.07, state: "LA", ppsf: 300 },
+  "New Orleans": { lat: 29.95, lng: -90.07, state: "LA", ppsf: 300, coast: "S", scatterScale: 0.7 },
   "Baton Rouge": { lat: 30.45, lng: -91.19, state: "LA", ppsf: 240 },
-  Chicago: { lat: 41.88, lng: -87.63, state: "IL", ppsf: 400 },
+  Chicago: { lat: 41.88, lng: -87.63, state: "IL", ppsf: 400, coast: "W" },
   Indianapolis: { lat: 39.77, lng: -86.16, state: "IN", ppsf: 240 },
-  Detroit: { lat: 42.33, lng: -83.05, state: "MI", ppsf: 260 },
+  Detroit: { lat: 42.33, lng: -83.05, state: "MI", ppsf: 260, coast: "NW" },
   "Grand Rapids": { lat: 42.96, lng: -85.67, state: "MI", ppsf: 280 },
-  Milwaukee: { lat: 43.04, lng: -87.91, state: "WI", ppsf: 300 },
-  Madison: { lat: 43.07, lng: -89.40, state: "WI", ppsf: 340 },
+  Milwaukee: { lat: 43.04, lng: -87.91, state: "WI", ppsf: 300, coast: "W" },
+  Madison: { lat: 43.07, lng: -89.40, state: "WI", ppsf: 340, coast: "EW", scatterScale: 0.6 },
   Minneapolis: { lat: 44.98, lng: -93.27, state: "MN", ppsf: 380 },
   "St. Paul": { lat: 44.95, lng: -93.09, state: "MN", ppsf: 340 },
   "Kansas City": { lat: 39.10, lng: -94.58, state: "MO", ppsf: 280 },
@@ -133,17 +155,17 @@ export const METRO_CENTERS: Record<string, MetroCenter> = {
   Omaha: { lat: 41.26, lng: -95.93, state: "NE", ppsf: 260 },
   "Des Moines": { lat: 41.59, lng: -93.62, state: "IA", ppsf: 250 },
   Wichita: { lat: 37.69, lng: -97.34, state: "KS", ppsf: 210 },
-  Cleveland: { lat: 41.50, lng: -81.69, state: "OH", ppsf: 240 },
+  Cleveland: { lat: 41.50, lng: -81.69, state: "OH", ppsf: 240, coast: "S" },
   Cincinnati: { lat: 39.10, lng: -84.51, state: "OH", ppsf: 260 },
   "Sioux Falls": { lat: 43.55, lng: -96.73, state: "SD", ppsf: 250 },
   Fargo: { lat: 46.88, lng: -96.79, state: "ND", ppsf: 250 },
   Orlando: { lat: 28.54, lng: -81.38, state: "FL", ppsf: 340 },
-  Jacksonville: { lat: 30.33, lng: -81.66, state: "FL", ppsf: 300 },
-  "Fort Lauderdale": { lat: 26.12, lng: -80.14, state: "FL", ppsf: 520 },
-  "West Palm Beach": { lat: 26.71, lng: -80.05, state: "FL", ppsf: 480 },
-  Naples: { lat: 26.14, lng: -81.79, state: "FL", ppsf: 700 },
-  Sarasota: { lat: 27.34, lng: -82.53, state: "FL", ppsf: 450 },
-  Savannah: { lat: 32.08, lng: -81.09, state: "GA", ppsf: 320 },
+  Jacksonville: { lat: 30.33, lng: -81.66, state: "FL", ppsf: 300, coast: "W" },
+  "Fort Lauderdale": { lat: 26.12, lng: -80.14, state: "FL", ppsf: 520, coast: "W" },
+  "West Palm Beach": { lat: 26.71, lng: -80.05, state: "FL", ppsf: 480, coast: "W" },
+  Naples: { lat: 26.14, lng: -81.79, state: "FL", ppsf: 700, coast: "E" },
+  Sarasota: { lat: 27.34, lng: -82.53, state: "FL", ppsf: 450, coast: "E" },
+  Savannah: { lat: 32.08, lng: -81.09, state: "GA", ppsf: 320, coast: "SW" },
   Birmingham: { lat: 33.52, lng: -86.81, state: "AL", ppsf: 240 },
   Huntsville: { lat: 34.73, lng: -86.59, state: "AL", ppsf: 260 },
   Jackson: { lat: 32.30, lng: -90.18, state: "MS", ppsf: 210 },
@@ -153,28 +175,28 @@ export const METRO_CENTERS: Record<string, MetroCenter> = {
   Louisville: { lat: 38.25, lng: -85.76, state: "KY", ppsf: 250 },
   Lexington: { lat: 38.04, lng: -84.50, state: "KY", ppsf: 260 },
   Columbia: { lat: 34.00, lng: -81.03, state: "SC", ppsf: 260 },
-  Charleston: { lat: 32.78, lng: -79.93, state: "SC", ppsf: 420 },
+  Charleston: { lat: 32.78, lng: -79.93, state: "SC", ppsf: 420, coast: "N", scatterScale: 0.7 },
   Greenville: { lat: 34.85, lng: -82.39, state: "SC", ppsf: 300 },
   Asheville: { lat: 35.60, lng: -82.55, state: "NC", ppsf: 400 },
   Greensboro: { lat: 36.07, lng: -79.79, state: "NC", ppsf: 260 },
   Durham: { lat: 35.99, lng: -78.90, state: "NC", ppsf: 320 },
   Richmond: { lat: 37.54, lng: -77.44, state: "VA", ppsf: 320 },
-  "Virginia Beach": { lat: 36.85, lng: -75.98, state: "VA", ppsf: 320 },
-  "New York": { lat: 40.71, lng: -74.01, state: "NY", ppsf: 900 },
-  Buffalo: { lat: 42.89, lng: -78.88, state: "NY", ppsf: 240 },
+  "Virginia Beach": { lat: 36.85, lng: -75.98, state: "VA", ppsf: 320, coast: "W" },
+  "New York": { lat: 40.71, lng: -74.01, state: "NY", ppsf: 900, coast: "N", scatterScale: 0.8 },
+  Buffalo: { lat: 42.89, lng: -78.88, state: "NY", ppsf: 240, coast: "E" },
   Rochester: { lat: 43.16, lng: -77.61, state: "NY", ppsf: 240 },
   Albany: { lat: 42.65, lng: -73.75, state: "NY", ppsf: 280 },
-  Boston: { lat: 42.36, lng: -71.06, state: "MA", ppsf: 750 },
+  Boston: { lat: 42.36, lng: -71.06, state: "MA", ppsf: 750, coast: "W" },
   Worcester: { lat: 42.26, lng: -71.80, state: "MA", ppsf: 380 },
-  Providence: { lat: 41.82, lng: -71.41, state: "RI", ppsf: 400 },
+  Providence: { lat: 41.82, lng: -71.41, state: "RI", ppsf: 400, coast: "N" },
   Hartford: { lat: 41.76, lng: -72.69, state: "CT", ppsf: 320 },
-  Stamford: { lat: 41.05, lng: -73.54, state: "CT", ppsf: 600 },
-  Newark: { lat: 40.74, lng: -74.17, state: "NJ", ppsf: 400 },
-  "Jersey City": { lat: 40.72, lng: -74.05, state: "NJ", ppsf: 700 },
-  Philadelphia: { lat: 39.95, lng: -75.17, state: "PA", ppsf: 300 },
+  Stamford: { lat: 41.05, lng: -73.54, state: "CT", ppsf: 600, coast: "N" },
+  Newark: { lat: 40.74, lng: -74.17, state: "NJ", ppsf: 400, coast: "W" },
+  "Jersey City": { lat: 40.72, lng: -74.05, state: "NJ", ppsf: 700, coast: "N", scatterScale: 0.5 },
+  Philadelphia: { lat: 39.95, lng: -75.17, state: "PA", ppsf: 300, coast: "NW" },
   Pittsburgh: { lat: 40.44, lng: -79.99, state: "PA", ppsf: 240 },
-  Baltimore: { lat: 39.29, lng: -76.61, state: "MD", ppsf: 300 },
-  Washington: { lat: 38.90, lng: -77.04, state: "DC", ppsf: 720 },
+  Baltimore: { lat: 39.29, lng: -76.61, state: "MD", ppsf: 300, coast: "NW" },
+  Washington: { lat: 38.90, lng: -77.04, state: "DC", ppsf: 720, coast: "NE" },
   Wilmington: { lat: 39.74, lng: -75.55, state: "DE", ppsf: 300 },
   Manchester: { lat: 42.99, lng: -71.45, state: "NH", ppsf: 360 },
   Burlington: { lat: 44.48, lng: -73.21, state: "VT", ppsf: 420 },
@@ -483,10 +505,9 @@ function generateExtra(): Development[] {
       const estValue = Math.round((units * 260_000 * tierMult * (0.85 + ((i * 7) % 11) * 0.03)) / 1000) * 1000;
       const angle = ci * 2.4 + i * 0.77;
       const ring = 0.006 + ((i * 3) % 9) * 0.006;          // ~0.4–2.9 mi, tight
-      const inland = m.lng < -98 ? 1 : -1;                 // push toward US interior
-      const rawLng = Math.cos(angle) * ring;
-      const lat = +(m.lat + Math.sin(angle) * ring).toFixed(4);
-      const lng = +(m.lng + (Math.sign(rawLng) === inland ? rawLng : rawLng * -0.4)).toFixed(4);
+      const off = safeOffset(m, Math.sin(angle) * ring, Math.cos(angle) * ring);
+      const lat = +(m.lat + off.latOff).toFixed(4);
+      const lng = +(m.lng + off.lngOff).toFixed(4);
       out.push({
         id: `gen-${ci}-${i}`,
         name: `${STREETS[(ci + i) % STREETS.length]} ${type}`,

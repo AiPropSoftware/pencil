@@ -177,6 +177,7 @@ export default function MapPage() {
   const [selected, setSelected] = React.useState<Selection>(null);
   const [dealsOnly, setDealsOnly] = React.useState(false);
   const [fly, setFly] = React.useState<{ lat: number; lng: number } | null>(null);
+  const [basemap, setBasemap] = React.useState<"streets" | "satellite">("streets");
 
   // Watchlist — hearts persist across visits.
   const { ids: watched, toggle: toggleWatch } = useWatchlist();
@@ -468,10 +469,19 @@ export default function MapPage() {
         {/* Map */}
         <div className="order-1 lg:order-2 relative h-[52vh] lg:h-[calc(100vh-9rem)]">
           <MapContainer center={US_CENTER} zoom={US_ZOOM} scrollWheelZoom className="h-full w-full" style={{ background: "#eae5db" }}>
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-            />
+            {basemap === "streets" ? (
+              <TileLayer
+                key="streets"
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+              />
+            ) : (
+              <TileLayer
+                key="satellite"
+                attribution="Esri, Maxar, Earthstar Geographics"
+                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              />
+            )}
             <FitOnPlace place={place} points={activeList.map((p) => ({ lat: p.lat, lng: p.lng }))} />
             <FlyToTarget target={fly} />
             <Clusters pins={pins} />
@@ -481,6 +491,21 @@ export default function MapPage() {
               <PulsingDot /> LIVE · self-updating
             </div>
           )}
+          {/* Basemap toggle — flip to real aerial imagery to verify any pin. */}
+          <div className="absolute top-3 right-3 z-[1000] flex overflow-hidden rounded-md border border-border bg-card/95 shadow-card backdrop-blur text-[11px] font-medium">
+            <button
+              onClick={() => setBasemap("streets")}
+              className={`px-2.5 py-1.5 ${basemap === "streets" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Map
+            </button>
+            <button
+              onClick={() => setBasemap("satellite")}
+              className={`px-2.5 py-1.5 ${basemap === "satellite" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Satellite
+            </button>
+          </div>
           <div className="absolute bottom-3 left-3 z-[1000] rounded-md border border-border bg-card/95 backdrop-blur px-3 py-2 shadow-card">
             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
               {(layer === "construction" ? PRODUCT_TYPES : LISTING_KINDS).map((t) => (

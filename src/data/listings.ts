@@ -6,7 +6,7 @@
  *
  * Demo data for now; swaps for MLS/ATTOM listings without UI changes.
  */
-import { METRO_CENTERS, type ProductType } from "./developments";
+import { METRO_CENTERS, safeOffset, type ProductType } from "./developments";
 import { scoreOpportunity } from "@/lib/underwrite/opportunity";
 
 export type ListingKind = "Vacant land" | "Teardown" | "SFH resale" | "Multifamily";
@@ -95,10 +95,9 @@ export const listings: Listing[] = (() => {
       const listPrice = Math.max(60_000, Math.round((opp.maxLandPrice * mult * existingPremium) / 1000) * 1000);
       const angle = ci * 1.9 + i * 0.61;
       const ring = 0.006 + ((i * 3) % 9) * 0.005;          // ~0.4–2.5 mi, tight
-      const inland = m.lng < -98 ? 1 : -1;                 // push toward US interior
-      const rawLng = Math.cos(angle) * ring;
-      const lat = +(m.lat + Math.sin(angle) * ring).toFixed(4);
-      const lng = +(m.lng + (Math.sign(rawLng) === inland ? rawLng : rawLng * -0.4)).toFixed(4);
+      const off = safeOffset(m, Math.sin(angle) * ring, Math.cos(angle) * ring);
+      const lat = +(m.lat + off.latOff).toFixed(4);
+      const lng = +(m.lng + off.lngOff).toFixed(4);
       const dom = 5 + (h % 120);
       const existing = kind === "Vacant land" ? 0 : 900 + (h % 20) * 90;
 
