@@ -655,7 +655,8 @@ function Metric({ icon: Icon, label, value, accent }: { icon: React.ComponentTyp
 }
 
 function StreetWalk({ lat, lng }: { lat: number; lng: number }) {
-  const panoUrl = `https://www.google.com/maps?q&layer=c&cbll=${lat},${lng}`;
+  // Official Google Maps URL API — reliably opens the Street View panorama.
+  const panoUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`;
   return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-2">

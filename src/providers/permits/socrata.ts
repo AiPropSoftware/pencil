@@ -242,12 +242,23 @@ export interface LivePermits {
 
 /** Fetch every city in parallel; failures degrade to per-city diagnostics. */
 export async function fetchAllCityDevelopments(): Promise<LivePermits> {
-  const settled = await Promise.allSettled(CITY_SOURCES.map((s) => fetchCityDevelopments(s)));
-  const perCity: CityResult[] = settled.map((r, i) =>
-    r.status === "fulfilled"
-      ? r.value
-      : { city: CITY_SOURCES[i].city, items: [], total: 0, columns: [], url: CITY_SOURCES[i].url, buildPpsfSamples: 0, error: String(r.reason) },
-  );
+  const { ARCGIS_SOURCES, fetchArcgisCity } = await import("./arcgis"); // avoid import cycle
+  const socrata = Promise.allSettled(CITY_SOURCES.map((s) => fetchCityDevelopments(s)));
+  const arcgis = Promise.allSettled(ARCGIS_SOURCES.map((s) => fetchArcgisCity(s)));
+  const [sSettled, aSettled] = await Promise.all([socrata, arcgis]);
+
+  const perCity: CityResult[] = [
+    ...sSettled.map((r, i) =>
+      r.status === "fulfilled"
+        ? r.value
+        : { city: CITY_SOURCES[i].city, items: [], total: 0, columns: [], url: CITY_SOURCES[i].url, buildPpsfSamples: 0, error: String(r.reason) },
+    ),
+    ...aSettled.map((r, i) =>
+      r.status === "fulfilled"
+        ? r.value
+        : { city: ARCGIS_SOURCES[i].city, items: [], total: 0, columns: [], url: ARCGIS_SOURCES[i].candidates[0], buildPpsfSamples: 0, error: String(r.reason) },
+    ),
+  ];
   const items = perCity.flatMap((c) => c.items);
   const liveBuildCosts: Record<string, { ppsf: number; samples: number }> = {};
   for (const c of perCity) {
