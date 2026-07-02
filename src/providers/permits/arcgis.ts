@@ -1,13 +1,16 @@
 /**
- * ArcGIS permit connector — many big counties (Miami-Dade first) publish
- * permits on ArcGIS FeatureServer/MapServer layers instead of Socrata.
+ * ArcGIS permit connector — many big counties (Miami-Dade, Nashville…)
+ * publish permits on Esri tech instead of Socrata.
  *
- * Schemas vary wildly across counties, so this normalizer is generic: it
- * scans attribute KEYS by pattern (type/desc/valuation/sqft/date/address/…)
- * instead of assuming exact names, handles ArcGIS epoch-millisecond dates,
- * and reads point geometry in WGS84. Each source lists candidate layer URLs
- * tried in order; failures surface in the Live chip diagnostics like every
- * other city, and the map falls back to demo data for that metro.
+ * SELF-DISCOVERY: a candidate can be a direct layer URL (…/FeatureServer/0)
+ * or a server root (…/arcgis). For roots, we fetch the server's own catalog
+ * (rest/services?f=json), find services named like permit/building, list
+ * their layers, and try those — so we never have to guess service names.
+ * Every attempt is recorded and surfaced in the Live chip diagnostics.
+ *
+ * The attribute normalizer is generic (keys matched by pattern), handles
+ * ArcGIS epoch-ms dates, point geometry, and polygon centroids (parcel
+ * layers), with a city-center sanity check for exact-pin accuracy.
  */
 import type { Development, ProductType, DevStatus } from "@/data/developments";
 import type { CityResult } from "./socrata";
@@ -15,7 +18,7 @@ import type { CityResult } from "./socrata";
 export interface ArcgisCitySource {
   city: string;
   state: string;
-  /** Layer endpoints (…/FeatureServer/0 style), tried in order. */
+  /** Direct layer URLs (…/FeatureServer/0) or server roots (…/arcgis). */
   candidates: string[];
   metroPpsf: number;
   lat: number;
@@ -28,16 +31,24 @@ export const ARCGIS_SOURCES: ArcgisCitySource[] = [
     city: "Miami",
     state: "FL",
     candidates: [
-      // City of Miami open-data hub (ArcGIS Online)
-      "https://services1.arcgis.com/Ao3Vh6rEmDGmvCPT/arcgis/rest/services/Building_Permits/FeatureServer/0",
-      "https://services1.arcgis.com/Ao3Vh6rEmDGmvCPT/arcgis/rest/services/BuildingPermits/FeatureServer/0",
-      // Miami-Dade County GIS
-      "https://gisweb.miamidade.gov/arcgis/rest/services/MD_PermitsPlus/MapServer/0",
+      "https://gisweb.miamidade.gov/arcgis", // confirmed reachable — discover its permit services
+      "https://gis.miamidade.gov/arcgis",
     ],
     metroPpsf: 800,
     lat: 25.76,
     lng: -80.19,
-    limit: 4000,
+    limit: 3000,
+  },
+  {
+    city: "Nashville",
+    state: "TN",
+    candidates: [
+      "https://maps.nashville.gov/arcgis", // Socrata portal retired — county GIS server
+    ],
+    metroPpsf: 420,
+    lat: 36.16,
+    lng: -86.78,
+    limit: 3000,
   },
 ];
 
@@ -66,7 +77,6 @@ function firstNumber(attrs: Attrs, keyRe: RegExp, min = 0): number | null {
   return null;
 }
 
-/** ArcGIS serves dates as epoch milliseconds; strings show up too. */
 function isoFromMaybe(v: unknown): string {
   if (typeof v === "number" && v > 1e11) return new Date(v).toISOString().slice(0, 10);
   const s = String(v ?? "").slice(0, 10);
@@ -103,10 +113,62 @@ function statusFrom(text: string): DevStatus {
   return "Permitted";
 }
 
+interface ArcgisGeometry { x?: number; y?: number; rings?: number[][][] }
 interface ArcgisResponse {
   error?: { code?: number; message?: string };
   fields?: { name: string }[];
-  features?: { attributes?: Attrs; geometry?: { x?: number; y?: number } }[];
+  features?: { attributes?: Attrs; geometry?: ArcgisGeometry }[];
+}
+
+function geomToLatLng(g: ArcgisGeometry | undefined): { lat: number; lng: number } | null {
+  if (!g) return null;
+  if (Number.isFinite(g.x) && Number.isFinite(g.y)) return { lat: g.y as number, lng: g.x as number };
+  // Polygon (parcel) layers: centroid of the first ring.
+  const ring = g.rings?.[0];
+  if (ring && ring.length > 2) {
+    let sx = 0, sy = 0;
+    for (const [x, y] of ring) { sx += x; sy += y; }
+    return { lat: sy / ring.length, lng: sx / ring.length };
+  }
+  return null;
+}
+
+async function getJson(url: string): Promise<Record<string, unknown>> {
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as Record<string, unknown>;
+}
+
+const isLayerUrl = (u: string) => /(FeatureServer|MapServer)\/\d+\/?$/.test(u);
+
+/** Crawl an ArcGIS server catalog for permit/building point layers. */
+async function discoverPermitLayers(root: string, notes: string[]): Promise<string[]> {
+  const out: string[] = [];
+  try {
+    const cat = (await getJson(`${root}/rest/services?f=json`)) as { services?: { name: string; type: string }[]; folders?: string[] };
+    const entries = [...(cat.services ?? [])];
+    const folders = (cat.folders ?? []).filter((f) => /permit|build|develop|plan/i.test(f)).slice(0, 3);
+    for (const f of folders) {
+      try {
+        const sub = (await getJson(`${root}/rest/services/${f}?f=json`)) as { services?: { name: string; type: string }[] };
+        entries.push(...(sub.services ?? []));
+      } catch { /* folder listing failed — skip */ }
+    }
+    const matches = entries.filter((s) => /permit|building/i.test(s.name)).slice(0, 4);
+    if (matches.length === 0) notes.push(`${root}: catalog has no permit/building services`);
+    for (const s of matches) {
+      const svcUrl = `${root}/rest/services/${s.name}/${s.type}`;
+      try {
+        const svc = (await getJson(`${svcUrl}?f=json`)) as { layers?: { id: number; name: string }[] };
+        for (const l of (svc.layers ?? []).slice(0, 5)) out.push(`${svcUrl}/${l.id}`);
+      } catch (e) {
+        notes.push(`${svcUrl}: ${(e as Error).message}`);
+      }
+    }
+  } catch (e) {
+    notes.push(`${root}: catalog ${(e as Error).message}`);
+  }
+  return out.slice(0, 8);
 }
 
 async function queryLayer(layerUrl: string, limit: number): Promise<{ data: ArcgisResponse; url: string }> {
@@ -119,52 +181,23 @@ async function queryLayer(layerUrl: string, limit: number): Promise<{ data: Arcg
     orderByFields: "OBJECTID DESC",
   });
   const url = `${layerUrl}/query?${params.toString()}`;
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = (await res.json()) as ArcgisResponse;
+  const data = (await getJson(url)) as ArcgisResponse;
   if (data.error) throw new Error(`ArcGIS ${data.error.code ?? ""}: ${data.error.message ?? "error"}`);
   return { data, url };
 }
 
-export async function fetchArcgisCity(src: ArcgisCitySource): Promise<CityResult> {
-  const limit = src.limit ?? 2000;
-  const attempts: string[] = [];
-  let data: ArcgisResponse | null = null;
-  let usedUrl = src.candidates[0];
-
-  for (const candidate of src.candidates) {
-    try {
-      const r = await queryLayer(candidate, limit);
-      if (r.data.features && r.data.features.length > 0) {
-        data = r.data;
-        usedUrl = r.url;
-        break;
-      }
-      attempts.push(`${candidate} → 0 features`);
-    } catch (e) {
-      attempts.push(`${candidate} → ${(e as Error).message}`);
-    }
-  }
-
-  if (!data) {
-    return {
-      city: src.city, items: [], total: 0, columns: [], url: src.candidates[0],
-      buildPpsfSamples: 0, error: attempts.join(" · ").slice(0, 400),
-    };
-  }
-
+function normalize(src: ArcgisCitySource, data: ArcgisResponse): { items: Development[]; ppsfSamples: number[]; columns: string[] } {
   const features = data.features ?? [];
   const columns = data.fields?.map((f) => f.name) ?? Object.keys(features[0]?.attributes ?? {});
   const seen = new Set<string>();
-  const out: Development[] = [];
+  const items: Development[] = [];
   const ppsfSamples: number[] = [];
 
   for (const f of features) {
     const attrs = f.attributes ?? {};
-    const lat = f.geometry?.y;
-    const lng = f.geometry?.x;
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-    if (Math.abs((lat as number) - src.lat) > 1.2 || Math.abs((lng as number) - src.lng) > 1.2) continue;
+    const coords = geomToLatLng(f.geometry);
+    if (!coords) continue;
+    if (Math.abs(coords.lat - src.lat) > 1.2 || Math.abs(coords.lng - src.lng) > 1.2) continue;
 
     const blob = textBlob(attrs, /type|class|desc|work|use|scope|category|name|status/i);
     const isResidential = /resid|family|duplex|town|apartment|condo|dwelling|sfr/i.test(blob);
@@ -172,7 +205,7 @@ export async function fetchArcgisCity(src: ArcgisCitySource): Promise<CityResult
     const isRemodel = /remodel|repair|addition|alteration|demo|interior|reroof|roof|mechanic|electric|plumb|hvac|pool|fence|sign|solar|shutter|awning|revision/i.test(blob);
     if (!isResidential || !isNew || isRemodel) continue;
 
-    const key = `${(lat as number).toFixed(5)},${(lng as number).toFixed(5)}`;
+    const key = `${coords.lat.toFixed(5)},${coords.lng.toFixed(5)}`;
     if (seen.has(key)) continue;
     seen.add(key);
 
@@ -195,14 +228,14 @@ export async function fetchArcgisCity(src: ArcgisCitySource): Promise<CityResult
       ? Math.min(900, Math.max(120, Math.round(valuation / buildingSqft)))
       : Math.round(src.metroPpsf * 0.45);
 
-    out.push({
+    items.push({
       id: `live-${src.city.toLowerCase().replace(/\s+/g, "")}-${permitId}`,
       name: address || `${type} — ${src.city}`,
       developer: contractor || "Permit holder on file",
       city: src.city,
       state: src.state,
-      lat: lat as number,
-      lng: lng as number,
+      lat: coords.lat,
+      lng: coords.lng,
       productType: type,
       units,
       landSqft: Math.round(buildingSqft * 1.3),
@@ -216,21 +249,57 @@ export async function fetchArcgisCity(src: ArcgisCitySource): Promise<CityResult
     });
   }
 
-  out.sort((a, b) => (a.approvedDate > b.approvedDate ? -1 : 1));
-  ppsfSamples.sort((a, b) => a - b);
-  const medianBuildPpsf = ppsfSamples.length >= 5
-    ? Math.round(ppsfSamples[Math.floor(ppsfSamples.length / 2)])
-    : undefined;
+  return { items, ppsfSamples, columns };
+}
+
+export async function fetchArcgisCity(src: ArcgisCitySource): Promise<CityResult> {
+  const limit = src.limit ?? 2000;
+  const notes: string[] = [];
+
+  // Expand server roots into concrete layer URLs via catalog discovery.
+  const layerUrls: string[] = [];
+  for (const c of src.candidates) {
+    if (isLayerUrl(c)) layerUrls.push(c);
+    else layerUrls.push(...(await discoverPermitLayers(c, notes)));
+  }
+  if (layerUrls.length === 0) {
+    return {
+      city: src.city, items: [], total: 0, columns: [], url: src.candidates[0],
+      buildPpsfSamples: 0, error: (notes.join(" · ") || "no layers discovered").slice(0, 400),
+    };
+  }
+
+  let lastColumns: string[] = [];
+  let lastUrl = layerUrls[0];
+  let lastTotal = 0;
+
+  for (const layer of layerUrls) {
+    try {
+      const { data, url } = await queryLayer(layer, limit);
+      lastUrl = url;
+      lastTotal = data.features?.length ?? 0;
+      const norm = normalize(src, data);
+      lastColumns = norm.columns;
+      if (norm.items.length > 0) {
+        norm.items.sort((a, b) => (a.approvedDate > b.approvedDate ? -1 : 1));
+        norm.ppsfSamples.sort((a, b) => a - b);
+        const medianBuildPpsf = norm.ppsfSamples.length >= 5
+          ? Math.round(norm.ppsfSamples[Math.floor(norm.ppsfSamples.length / 2)])
+          : undefined;
+        return {
+          city: src.city, items: norm.items.slice(0, 500), total: lastTotal, columns: norm.columns, url,
+          medianBuildPpsf, buildPpsfSamples: norm.ppsfSamples.length,
+          error: notes.length ? `notes: ${notes.join(" · ").slice(0, 200)}` : undefined,
+        };
+      }
+      notes.push(`${layer} → ${lastTotal} rows, 0 matched`);
+    } catch (e) {
+      notes.push(`${layer} → ${(e as Error).message}`);
+    }
+  }
 
   return {
-    city: src.city,
-    items: out.slice(0, 400),
-    total: features.length,
-    columns,
-    url: usedUrl,
-    medianBuildPpsf,
-    buildPpsfSamples: ppsfSamples.length,
-    // Surface earlier failed candidates even on success, for transparency.
-    error: out.length === 0 ? `matched 0 of ${features.length} rows — see columns` : (attempts.length ? `also tried: ${attempts.join(" · ").slice(0, 200)}` : undefined),
+    city: src.city, items: [], total: lastTotal, columns: lastColumns, url: lastUrl,
+    buildPpsfSamples: 0, error: notes.join(" · ").slice(0, 400),
   };
 }

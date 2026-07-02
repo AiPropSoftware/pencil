@@ -76,6 +76,7 @@ export interface CitySource {
   lat: number;          // city center, for coordinate sanity checks
   lng: number;
   limit?: number;       // rows to fetch (default 2500)
+  where?: string;       // optional SoQL filter to boost new-construction yield
 }
 
 /**
@@ -85,10 +86,9 @@ export interface CitySource {
  */
 export const CITY_SOURCES: CitySource[] = [
   { city: "Austin", state: "TX", url: "https://data.austintexas.gov/resource/3syk-w9eu.json", metroPpsf: 470, lat: 30.27, lng: -97.74, limit: 8000 },
-  { city: "Chicago", state: "IL", url: "https://data.cityofchicago.org/resource/ydr8-5enu.json", metroPpsf: 400, lat: 41.88, lng: -87.63, limit: 6000 },
+  { city: "Chicago", state: "IL", url: "https://data.cityofchicago.org/resource/ydr8-5enu.json", metroPpsf: 400, lat: 41.88, lng: -87.63, limit: 6000, where: "permit_type='PERMIT - NEW CONSTRUCTION'" },
   { city: "Seattle", state: "WA", url: "https://data.seattle.gov/resource/76t5-zqzr.json", metroPpsf: 720, lat: 47.61, lng: -122.33, limit: 6000 },
-  { city: "San Francisco", state: "CA", url: "https://data.sfgov.org/resource/i98e-djp9.json", metroPpsf: 950, lat: 37.77, lng: -122.42, limit: 6000 },
-  { city: "Nashville", state: "TN", url: "https://data.nashville.gov/resource/kqff-rxj8.json", metroPpsf: 420, lat: 36.16, lng: -86.78, limit: 6000 },
+  { city: "San Francisco", state: "CA", url: "https://data.sfgov.org/resource/i98e-djp9.json", metroPpsf: 950, lat: 37.77, lng: -122.42, limit: 6000, where: "lower(permit_type_definition) LIKE '%new construction%'" },
   { city: "New York", state: "NY", url: "https://data.cityofnewyork.us/resource/ipu4-2q9a.json", metroPpsf: 900, lat: 40.71, lng: -74.01, limit: 6000 },
 ];
 
@@ -113,17 +113,26 @@ export async function fetchCityDevelopments(src: CitySource, limitOverride?: num
   const token = import.meta.env.VITE_SOCRATA_APP_TOKEN as string | undefined;
   if (token) base.set("$$app_token", token);
 
-  // Bias toward recent rows via the :id system field (safe on all datasets);
-  // if a dataset rejects it, retry plain.
+  // Retry ladder: (where + order) -> (order) -> (plain). A wrong column in
+  // where/order makes Socrata reject the whole query, so degrade gracefully.
+  const variants: URLSearchParams[] = [];
+  if (src.where) {
+    const v = new URLSearchParams(base);
+    v.set("$where", src.where);
+    v.set("$order", ":id DESC");
+    variants.push(v);
+  }
   const ordered = new URLSearchParams(base);
   ordered.set("$order", ":id DESC");
-  let url = `${src.url}?${ordered.toString()}`;
+  variants.push(ordered, base);
+
+  let url = `${src.url}?${variants[0].toString()}`;
 
   let rows: Record<string, unknown>[] = [];
   try {
     let res = await fetch(url, { headers: { Accept: "application/json" } });
-    if (res.status === 400) {
-      url = `${src.url}?${base.toString()}`;
+    for (let i = 1; i < variants.length && res.status === 400; i++) {
+      url = `${src.url}?${variants[i].toString()}`;
       res = await fetch(url, { headers: { Accept: "application/json" } });
     }
     if (!res.ok) {
@@ -227,7 +236,7 @@ export async function fetchCityDevelopments(src: CitySource, limitOverride?: num
     ? Math.round(ppsfSamples[Math.floor(ppsfSamples.length / 2)])
     : undefined;
   return {
-    city: src.city, items: out.slice(0, 400), total: rows.length, columns, url,
+    city: src.city, items: out.slice(0, 500), total: rows.length, columns, url,
     medianBuildPpsf, buildPpsfSamples: ppsfSamples.length,
   };
 }
