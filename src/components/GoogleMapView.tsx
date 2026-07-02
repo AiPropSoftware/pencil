@@ -92,32 +92,62 @@ export function GoogleMapView({
     return () => { cancelled = true; offAuth(); };
   }, [apiKey]);
 
-  // Markers + clustering follow the pin set.
+  // Rebuilding thousands of Marker objects on every interaction is what makes
+  // the map feel slow — so the full set is built only when the pin DATA
+  // changes (layer switch, filters, live refresh), keyed by a fingerprint.
+  // Selection changes just restyle the two affected markers.
+  const markersRef = React.useRef<Map<string, any>>(new Map());
+  const pinByIdRef = React.useRef<Map<string, GPin>>(new Map());
+  pinByIdRef.current = new Map(pins.map((p) => [p.id, p]));
+  const geomKey = React.useMemo(() => pins.map((p) => p.id + (p.deal ? "!" : "")).join("|"), [pins]);
+  const selectedId = React.useMemo(() => pins.find((p) => p.selected)?.id ?? null, [pins]);
+  const prevSelectedRef = React.useRef<string | null>(null);
+
+  const iconFor = (g: any, p: GPin, sel: boolean) => ({
+    path: g.maps.SymbolPath.CIRCLE,
+    fillColor: p.color,
+    fillOpacity: sel ? 1 : 0.85,
+    strokeColor: p.deal ? "#c8a55c" : "#ffffff",
+    strokeWeight: p.deal ? 3 : 2,
+    scale: sel ? 9 : 7,
+  });
+
   React.useEffect(() => {
     const map = mapRef.current;
     const g = (window as any).google;
     if (!map || !g?.maps || !ready) return;
     clusterRef.current?.clearMarkers();
+    markersRef.current.clear();
     const markers = pins.map((p) => {
       const m = new g.maps.Marker({
         position: { lat: p.lat, lng: p.lng },
         title: p.label,
-        icon: {
-          path: g.maps.SymbolPath.CIRCLE,
-          fillColor: p.color,
-          fillOpacity: p.selected ? 1 : 0.85,
-          strokeColor: p.deal ? "#c8a55c" : "#ffffff",
-          strokeWeight: p.deal ? 3 : 2,
-          scale: p.selected ? 9 : 7,
-        },
-        zIndex: p.selected ? 999 : undefined,
+        icon: iconFor(g, p, false),
       });
-      m.addListener("click", p.onClick);
+      // Look the pin up at click time so handlers never go stale.
+      m.addListener("click", () => pinByIdRef.current.get(p.id)?.onClick());
+      markersRef.current.set(p.id, m);
       return m;
     });
     clusterRef.current = new MarkerClusterer({ map, markers, renderer: clusterRenderer as any });
-    return () => { clusterRef.current?.clearMarkers(); };
-  }, [pins, ready]);
+    return () => { clusterRef.current?.clearMarkers(); markersRef.current.clear(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geomKey, ready]);
+
+  React.useEffect(() => {
+    const g = (window as any).google;
+    if (!g?.maps || !ready) return;
+    for (const id of [prevSelectedRef.current, selectedId]) {
+      if (!id) continue;
+      const m = markersRef.current.get(id);
+      const p = pinByIdRef.current.get(id);
+      if (m && p) {
+        m.setIcon(iconFor(g, p, p.selected));
+        m.setZIndex(p.selected ? 999 : undefined);
+      }
+    }
+    prevSelectedRef.current = selectedId;
+  }, [selectedId, ready, geomKey]);
 
   // Fly to a picked property.
   React.useEffect(() => {
