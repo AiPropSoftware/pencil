@@ -91,6 +91,7 @@ export const CITY_SOURCES: CitySource[] = [
   { city: "San Francisco", state: "CA", url: "https://data.sfgov.org/resource/i98e-djp9.json", metroPpsf: 950, lat: 37.77, lng: -122.42, limit: 6000, where: "lower(permit_type_definition) LIKE '%new construction%'" },
   { city: "New York", state: "NY", url: "https://data.cityofnewyork.us/resource/ipu4-2q9a.json", metroPpsf: 900, lat: 40.71, lng: -74.01, limit: 6000 },
   { city: "Los Angeles", state: "CA", url: "https://data.lacity.org/resource/yv23-pmwf.json", metroPpsf: 720, lat: 34.05, lng: -118.24, limit: 6000 },
+  { city: "Fort Worth", state: "TX", url: "https://data.fortworthtexas.gov/resource/quz7-xnsy.json", metroPpsf: 300, lat: 32.75, lng: -97.33, limit: 5000 },
 ];
 
 export const AUSTIN = CITY_SOURCES[0];
@@ -159,6 +160,10 @@ export async function fetchCityDevelopments(src: CitySource, limitOverride?: num
     if (!coords) continue;
     // Sanity: exact-pin accuracy means dropping bad geocodes, not mapping them.
     if (Math.abs(coords.lat - src.lat) > 1.2 || Math.abs(coords.lng - src.lng) > 1.2) continue;
+    // Accuracy tier: ≤3-decimal grid (~111 m) = block/zip centroid, not the
+    // parcel — drop rather than pin the wrong spot.
+    const tooCoarse = (n: number) => Math.abs(n * 1000 - Math.round(n * 1000)) < 1e-9;
+    if (tooCoarse(coords.lat) && tooCoarse(coords.lng)) continue;
 
     const typeDesc = String(pick(r, ["permit_type_desc", "permit_type", "permittype", "permit_type_definition", "permittypedesc", "permit_type_description"]) ?? "");
     const pclass = String(pick(r, ["permit_class", "permit_class_mapped", "permitclass", "permitclassmapped"]) ?? "");

@@ -62,6 +62,52 @@ export const ARCGIS_SOURCES: ArcgisCitySource[] = [
     lng: -96.80,
     limit: 3000,
   },
+  {
+    city: "Denver",
+    state: "CO",
+    candidates: [
+      "https://gis.denvergov.org/arcgis",
+      "https://maps.denvergov.org/arcgis",
+    ],
+    metroPpsf: 520,
+    lat: 39.74,
+    lng: -104.99,
+    limit: 3000,
+  },
+  {
+    city: "Phoenix",
+    state: "AZ",
+    candidates: [
+      "https://maps.phoenix.gov/arcgis",
+    ],
+    metroPpsf: 360,
+    lat: 33.45,
+    lng: -112.07,
+    limit: 3000,
+  },
+  {
+    city: "Houston",
+    state: "TX",
+    candidates: [
+      "https://mycity.houstontx.gov/arcgis",
+      "https://mycity.houstontx.gov/pubgis01",
+    ],
+    metroPpsf: 320,
+    lat: 29.76,
+    lng: -95.37,
+    limit: 3000,
+  },
+  {
+    city: "Portland",
+    state: "OR",
+    candidates: [
+      "https://www.portlandmaps.com/arcgis",
+    ],
+    metroPpsf: 560,
+    lat: 45.51,
+    lng: -122.68,
+    limit: 3000,
+  },
 ];
 
 type Attrs = Record<string, unknown>;
@@ -132,6 +178,9 @@ interface ArcgisResponse {
   features?: { attributes?: Attrs; geometry?: ArcgisGeometry }[];
 }
 
+/** True when a coordinate sits exactly on a 3-decimal grid (≈111 m). */
+const tooCoarse = (n: number) => Math.abs(n * 1000 - Math.round(n * 1000)) < 1e-9;
+
 function geomToLatLng(g: ArcgisGeometry | undefined): { lat: number; lng: number } | null {
   if (!g) return null;
   if (Number.isFinite(g.x) && Number.isFinite(g.y)) return { lat: g.y as number, lng: g.x as number };
@@ -169,7 +218,9 @@ async function discoverPermitLayers(root: string, notes: string[]): Promise<stri
       const s = sub as { services?: { name: string; type: string }[] } | null;
       if (s?.services) entries.push(...s.services);
     }
-    const matches = entries.filter((s) => SERVICE_RE.test(s.name)).slice(0, 5);
+    const matches = entries
+      .filter((s) => (s.type === "MapServer" || s.type === "FeatureServer") && SERVICE_RE.test(s.name))
+      .slice(0, 5);
     if (matches.length === 0) {
       // Self-documenting: report what the catalog ACTUALLY contains so the
       // next diagnostic screenshot names the real services to target.
@@ -218,6 +269,9 @@ function normalize(src: ArcgisCitySource, data: ArcgisResponse): { items: Develo
     const coords = geomToLatLng(f.geometry);
     if (!coords) continue;
     if (Math.abs(coords.lat - src.lat) > 1.2 || Math.abs(coords.lng - src.lng) > 1.2) continue;
+    // Accuracy tier: coordinates on a ≤3-decimal grid (~111 m) mean the city
+    // geocoded to a block/zip centroid, not the parcel — drop, don't mislead.
+    if (tooCoarse(coords.lat) && tooCoarse(coords.lng)) continue;
 
     const blob = textBlob(attrs, /type|class|desc|work|use|scope|category|name|status/i);
     const isResidential = /resid|family|duplex|town|apartment|condo|dwelling|sfr/i.test(blob);
