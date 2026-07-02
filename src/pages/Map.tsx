@@ -193,6 +193,13 @@ export default function MapPage() {
           setLiveBuildCosts(r.liveBuildCosts); // real permit-derived build $/sf feeds the X-ray
           setLive(r);
           setLastUpdated(Date.now());
+          // Diagnostics live in the console now (the chip is a pure status light).
+          // eslint-disable-next-line no-console
+          console.info("[Pencil] live permit feeds:", r.perCity.map((c) => ({
+            city: c.city, rows: c.total, usable: c.items.length,
+            buildPpsf: c.medianBuildPpsf ?? null, error: c.error ?? null, url: c.url,
+            columns: c.items.length === 0 ? c.columns.join(",") : undefined,
+          })));
         })
         .catch(() => { if (!cancelled) setLive((prev) => prev ?? { perCity: [], items: [], liveCityNames: [], liveBuildCosts: {} }); });
     };
@@ -461,60 +468,22 @@ function FlyToTarget({ target }: { target: { lat: number; lng: number } | null }
   return null;
 }
 
+/** Pure status light — details go to the developer console, not the UI. */
 function LiveStatusChip({ live, lastUpdated }: { live: LivePermits | null; lastUpdated: number | null }) {
-  const [open, setOpen] = React.useState(false);
   const total = live?.items.length ?? 0;
   const cities = live?.liveCityNames ?? [];
   const label = !live
-    ? "Checking live city feeds…"
+    ? "Connecting to city records…"
     : total > 0
-      ? `Live · ${cities.length} ${cities.length === 1 ? "city" : "cities"} · ${total} real permits`
-      : "Live feeds: no data";
+      ? `Live · ${cities.length} ${cities.length === 1 ? "city" : "cities"} · ${total.toLocaleString("en-US")} real permits`
+      : "Live feeds offline";
   return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-2 text-xs text-muted-foreground hover:text-foreground"
-      >
-        {total > 0 ? <PulsingDot /> : <span className={`h-2 w-2 rounded-full ${!live ? "bg-muted-foreground/50" : "bg-destructive/60"}`} />}
-        {label}
-        <span className="text-muted-foreground/60">ⓘ</span>
-      </button>
-      {open && (
-        <div className="absolute right-0 z-[3000] mt-2 w-96 max-h-[70vh] overflow-y-auto rounded-md border border-border bg-card p-3 shadow-elevated text-xs">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="font-medium text-foreground">Live open-data permit feeds</span>
-            <span className="text-muted-foreground">
-              {lastUpdated
-                ? `refreshed ${new Date(lastUpdated).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-                : "…"} · auto every 5 min
-            </span>
-          </div>
-          {!live && <div className="text-muted-foreground">Loading…</div>}
-          {live?.perCity.map((c) => (
-            <div key={c.city} className="mb-2 border-b border-border/60 pb-2 last:mb-0 last:border-0 last:pb-0">
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-foreground">{c.city}</span>
-                <span className={c.items.length > 0 ? "text-gold" : "text-destructive"}>
-                  {c.items.length > 0 ? `● ${c.items.length} live` : "no data"}
-                </span>
-              </div>
-              <div className="text-muted-foreground">rows {c.total} · usable {c.items.length}
-                {c.medianBuildPpsf ? <> · build <span className="text-foreground">${c.medianBuildPpsf}/sf</span> (n={c.buildPpsfSamples})</> : null}
-              </div>
-              {c.error && <div className="text-destructive break-words">{c.error}</div>}
-              {c.items.length === 0 && !c.error && c.columns.length > 0 && (
-                <div className="mt-1 max-h-24 overflow-y-auto rounded bg-secondary/50 p-1.5 text-[11px] break-words">
-                  {c.columns.join(", ")}
-                </div>
-              )}
-            </div>
-          ))}
-          <p className="mt-2 text-muted-foreground">
-            Screenshot this panel and send it — each city with “no data” gets tuned from its column list.
-          </p>
-        </div>
-      )}
+    <div
+      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-2 text-xs text-muted-foreground"
+      title={lastUpdated ? `Refreshed ${new Date(lastUpdated).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · auto every 5 min` : undefined}
+    >
+      {total > 0 ? <PulsingDot /> : <span className={`h-2 w-2 rounded-full ${!live ? "bg-muted-foreground/50" : "bg-destructive/60"}`} />}
+      {label}
     </div>
   );
 }

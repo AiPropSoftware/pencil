@@ -50,6 +50,18 @@ export const ARCGIS_SOURCES: ArcgisCitySource[] = [
     lng: -86.78,
     limit: 3000,
   },
+  {
+    city: "Dallas",
+    state: "TX",
+    candidates: [
+      "https://gis.dallascityhall.com/wwwgis",
+      "https://gis.dallascityhall.com/arcgis",
+    ],
+    metroPpsf: 360,
+    lat: 32.78,
+    lng: -96.80,
+    limit: 3000,
+  },
 ];
 
 type Attrs = Record<string, unknown>;
