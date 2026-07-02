@@ -24,6 +24,7 @@ import { fetchSoldRates } from "@/providers/sold/socrataSales";
 import { setLiveSaleRates } from "@/lib/underwrite/liveSaleRates";
 import { fetchMlsListings } from "@/providers/listings/mls";
 import { discoverCityPermits } from "@/providers/permits/discovery";
+import { geocodeVerify } from "@/lib/googleMaps";
 import { scoreOpportunity, buildPpsf, PLAUSIBLE_MARGIN_CAP } from "@/lib/underwrite/opportunity";
 import { setLiveBuildCosts, getLiveBuildCost } from "@/lib/underwrite/liveCosts";
 import { useWatchlist } from "@/hooks/useWatchlist";
@@ -38,7 +39,11 @@ import {
 const US_CENTER: [number, number] = [39.5, -98.35];
 const US_ZOOM = 4.4;
 const PAGE = 14;
-const GOOGLE_MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY as string | undefined;
+// Domain-restricted public client key (env var overrides). Unlocks the
+// embedded Street View panorama + Google geocoder pin cross-checks.
+const GOOGLE_MAPS_KEY =
+  (import.meta.env.VITE_GOOGLE_MAPS_KEY as string | undefined) ||
+  "AIzaSyAiF6_fZGh2obSzRVLLgIiuIBltxIVv9Wk";
 
 type Layer = "construction" | "listings";
 type Selection =
@@ -845,6 +850,31 @@ function CityResources({ city, state }: { city: string; state: string }) {
   );
 }
 
+/** Second-source accuracy: Google's geocoder locates the permit's address
+ * independently; we report how far it lands from the city's own pin. */
+function GeocoderCheck({ dev }: { dev: Development }) {
+  const [dist, setDist] = React.useState<number | null>(null);
+  React.useEffect(() => {
+    if (!GOOGLE_MAPS_KEY || !dev.id.startsWith("live-") || !dev.name || dev.name.length < 8) return;
+    let cancelled = false;
+    geocodeVerify(GOOGLE_MAPS_KEY, `${dev.name}, ${dev.city}, ${dev.state}`, dev.lat, dev.lng)
+      .then((r) => { if (!cancelled && r) setDist(r.distanceM); });
+    return () => { cancelled = true; };
+  }, [dev]);
+  if (dist === null) return null;
+  return dist <= 150 ? (
+    <p className="mt-1 flex items-center gap-1.5 text-xs text-gold">
+      <span className="h-1.5 w-1.5 rounded-full bg-gold" />
+      Cross-checked: Google’s geocoder agrees (±{dist} m)
+    </p>
+  ) : (
+    <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span className="h-1.5 w-1.5 rounded-full bg-destructive/60" />
+      Google’s geocoder places this address ~{dist.toLocaleString("en-US")} m away — verify on Satellite
+    </p>
+  );
+}
+
 function ShareWatchRow({ id, watched, onWatch }: { id: string; watched: boolean; onWatch: () => void }) {
   return (
     <div className="mt-4 flex gap-2">
@@ -890,6 +920,7 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
             Verified public record — address &amp; pin from the city’s own GIS
           </p>
         )}
+        <GeocoderCheck dev={dev} />
         <span className="mt-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-white" style={{ background: TYPE_COLOR[dev.productType] }}>{dev.productType}</span>
         <p className="mt-4 text-sm text-foreground/90 leading-relaxed">{dev.description}</p>
 
