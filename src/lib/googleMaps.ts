@@ -33,21 +33,25 @@ export function loadGoogleMaps(key: string): Promise<any> {
     authListeners.forEach((cb) => cb());
   };
   loader = new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&loading=async`;
-    s.async = true;
-    // With loading=async the script only bootstraps importLibrary — the actual
-    // classes (Map, Marker, Geocoder) exist only after their libraries load.
-    s.onload = () => {
-      Promise.all([
-        w.google.maps.importLibrary("maps"),
-        w.google.maps.importLibrary("marker"),
-        w.google.maps.importLibrary("geocoding"),
-      ])
-        .then(() => resolve(w.google))
-        .catch((e) => { loader = null; reject(e); });
+    // A stalled request (blocked network, extension, flaky proxy) fires neither
+    // onload nor onerror — without a deadline the promise never settles and the
+    // map pane sits blank forever.
+    const deadline = setTimeout(() => {
+      loader = null;
+      reject(new Error("Google Maps JS timed out"));
+    }, 10000);
+    // With loading=async, script onload fires BEFORE the API finishes its own
+    // async init — google.maps isn't usable yet. Google's contract for this
+    // mode is the callback param: it's invoked when the namespace is ready.
+    w.__pencilMapsReady = () => {
+      delete w.__pencilMapsReady;
+      clearTimeout(deadline);
+      resolve(w.google);
     };
-    s.onerror = () => { loader = null; reject(new Error("Google Maps JS failed to load")); };
+    const s = document.createElement("script");
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&loading=async&callback=__pencilMapsReady`;
+    s.async = true;
+    s.onerror = () => { clearTimeout(deadline); loader = null; reject(new Error("Google Maps JS failed to load")); };
     document.head.appendChild(s);
   });
   return loader;

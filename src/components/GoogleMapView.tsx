@@ -84,7 +84,11 @@ export function GoogleMapView({
         });
         setReady(true);
       })
-      .catch(fail);
+      .catch((e) => {
+        // eslint-disable-next-line no-console
+        console.warn("[Pencil] Google view failed:", (e as Error)?.message ?? e);
+        fail();
+      });
     return () => { cancelled = true; offAuth(); };
   }, [apiKey]);
 
@@ -145,5 +149,16 @@ export function GoogleMapView({
       </div>
     );
   }
-  return <div ref={ref} className="h-full w-full" />;
+  return (
+    <div className="relative h-full w-full">
+      <div ref={ref} className="h-full w-full" />
+      {!ready && (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center bg-secondary/30">
+          <span className="animate-pulse rounded-md border border-border bg-card/95 px-3 py-1.5 text-xs text-muted-foreground shadow-card">
+            Loading Google Maps…
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }

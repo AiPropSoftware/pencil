@@ -483,7 +483,7 @@ export default function MapPage() {
               fitPoints={activeList.map((p) => ({ lat: p.lat, lng: p.lng }))}
               onFailed={() => {
                 setBasemap("streets");
-                toast.error("Google view unavailable — the key's billing or website restriction is blocking it. Switched to Map view.");
+                toast.error("Google view couldn't load (network block or key restriction) — switched to Map view. Tap Google to retry.");
               }}
             />
           ) : (
