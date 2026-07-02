@@ -23,6 +23,7 @@ import { fetchAllCityDevelopments, type LivePermits } from "@/providers/permits/
 import { fetchSoldRates } from "@/providers/sold/socrataSales";
 import { setLiveSaleRates } from "@/lib/underwrite/liveSaleRates";
 import { fetchMlsListings } from "@/providers/listings/mls";
+import { discoverCityPermits } from "@/providers/permits/discovery";
 import { scoreOpportunity, buildPpsf, PLAUSIBLE_MARGIN_CAP } from "@/lib/underwrite/opportunity";
 import { setLiveBuildCosts, getLiveBuildCost } from "@/lib/underwrite/liveCosts";
 import { useWatchlist } from "@/hooks/useWatchlist";
@@ -231,6 +232,11 @@ export default function MapPage() {
     return () => { cancelled = true; clearInterval(timer); };
   }, []);
 
+  // National self-discovery: permits found on demand for searched places.
+  const [discovered, setDiscovered] = React.useState<Record<string, Development[]>>({});
+  const [discovering, setDiscovering] = React.useState(false);
+  const discoveryRan = React.useRef<Set<string>>(new Set());
+
   // Real MLS listings replace demo listings in the cities they cover.
   const allListings = React.useMemo(() => {
     if (mlsListings.length === 0) return listings;
@@ -241,9 +247,14 @@ export default function MapPage() {
   React.useEffect(() => { setVisibleCount(PAGE); }, [place, layer, typeFilter, kindFilter, dealsOnly, watchOnly]);
 
   const allDevs = React.useMemo(() => {
-    if (!live || live.items.length === 0) return developments;
-    return [...developments.filter((d) => !live.liveCityNames.includes(d.city)), ...live.items];
-  }, [live]);
+    const base = (!live || live.items.length === 0)
+      ? developments
+      : [...developments.filter((d) => !live.liveCityNames.includes(d.city)), ...live.items];
+    const extra = Object.values(discovered).flat();
+    if (extra.length === 0) return base;
+    const ids = new Set(base.map((d) => d.id));
+    return [...base, ...extra.filter((d) => !ids.has(d.id))];
+  }, [live, discovered]);
 
   // "What's new since your last visit" — the comeback hook.
   const [newCount, setNewCount] = React.useState(0);
@@ -301,6 +312,29 @@ export default function MapPage() {
       (!watchOnly || watched.has(l.id))),
     [allListings, kindFilter, place, dealsOnly, watchOnly, watched],
   );
+
+  // On-demand discovery: user searches a place we have little/no data for →
+  // hunt its permit datasets across the national Socrata/ArcGIS catalogs.
+  React.useEffect(() => {
+    const key = place.trim().toLowerCase();
+    if (key.length < 4 || layer !== "construction") return;
+    if (discoveryRan.current.has(key)) return;
+    const timer = setTimeout(() => {
+      if (discoveryRan.current.has(key)) return;
+      if (devMatches.length >= 8) { discoveryRan.current.add(key); return; } // already covered
+      discoveryRan.current.add(key);
+      setDiscovering(true);
+      discoverCityPermits(place)
+        .then((r) => {
+          // eslint-disable-next-line no-console
+          console.info("[Pencil] discovery:", place, { found: r.items.length, sources: r.sources, notes: r.notes });
+          if (r.items.length > 0) setDiscovered((prev) => ({ ...prev, [key]: r.items }));
+        })
+        .catch(() => {})
+        .finally(() => setDiscovering(false));
+    }, 900); // debounce typing
+    return () => clearTimeout(timer);
+  }, [place, layer, devMatches.length]);
 
   // Auto-finder: score every listing and float the best deals to the top.
   const scoredListings = React.useMemo(
@@ -397,6 +431,11 @@ export default function MapPage() {
             <span>{activeList.length} {layer === "construction" ? "projects" : "listings"}{place ? ` in “${place}”` : ""}</span>
             {!place && <span className="text-gold">Search a city to focus</span>}
           </div>
+          {discovering && (
+            <div className="mx-3 mb-2 rounded-md border border-gold/40 bg-gold-muted/40 p-2.5 text-xs text-foreground/80 animate-pulse">
+              🔍 Searching national public-record catalogs for “{place}”…
+            </div>
+          )}
           <div className="px-3 pb-3 space-y-2">
             {visible.map((item) =>
               layer === "construction"
