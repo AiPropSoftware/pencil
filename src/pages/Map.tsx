@@ -500,8 +500,7 @@ function LiveStatusChip({ live, lastUpdated }: { live: LivePermits | null; lastU
                 </span>
               </div>
               <div className="text-muted-foreground">rows {c.total} · usable {c.items.length}
-                {c.medianBuildPpsf ? <> · build <span className="text-foreground">${c.medianBuildPpsf}/sf</span> (n={c.buildPpsfSamples})</> : null} ·{" "}
-                <a href={c.url} target="_blank" rel="noreferrer" className="text-gold hover:underline">raw data</a>
+                {c.medianBuildPpsf ? <> · build <span className="text-foreground">${c.medianBuildPpsf}/sf</span> (n={c.buildPpsfSamples})</> : null}
               </div>
               {c.error && <div className="text-destructive break-words">{c.error}</div>}
               {c.items.length === 0 && !c.error && c.columns.length > 0 && (
@@ -818,6 +817,12 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
       <div className="p-6">
         <h2 className="font-display text-2xl">{dev.name}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{dev.city}, {dev.state}</p>
+        {dev.id.startsWith("live-") && (
+          <p className="mt-1.5 flex items-center gap-1.5 text-xs text-gold">
+            <span className="h-1.5 w-1.5 rounded-full bg-gold" />
+            Verified public record — address &amp; pin from the city’s own GIS
+          </p>
+        )}
         <span className="mt-3 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-white" style={{ background: TYPE_COLOR[dev.productType] }}>{dev.productType}</span>
         <p className="mt-4 text-sm text-foreground/90 leading-relaxed">{dev.description}</p>
 

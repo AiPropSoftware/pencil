@@ -141,26 +141,34 @@ async function getJson(url: string): Promise<Record<string, unknown>> {
 
 const isLayerUrl = (u: string) => /(FeatureServer|MapServer)\/\d+\/?$/.test(u);
 
-/** Crawl an ArcGIS server catalog for permit/building point layers. */
+const SERVICE_RE = /permit|bldg|building|construct|develop|epermit|bnzap|inspection|planning/i;
+
+/** Crawl an ArcGIS server catalog (ALL folders) for permit-like layers. */
 async function discoverPermitLayers(root: string, notes: string[]): Promise<string[]> {
   const out: string[] = [];
   try {
     const cat = (await getJson(`${root}/rest/services?f=json`)) as { services?: { name: string; type: string }[]; folders?: string[] };
     const entries = [...(cat.services ?? [])];
-    const folders = (cat.folders ?? []).filter((f) => /permit|build|develop|plan/i.test(f)).slice(0, 3);
-    for (const f of folders) {
-      try {
-        const sub = (await getJson(`${root}/rest/services/${f}?f=json`)) as { services?: { name: string; type: string }[] };
-        entries.push(...(sub.services ?? []));
-      } catch { /* folder listing failed — skip */ }
+    const folders = (cat.folders ?? []).slice(0, 25); // crawl everything, bounded
+    const subs = await Promise.all(
+      folders.map((f) => getJson(`${root}/rest/services/${f}?f=json`).catch(() => null)),
+    );
+    for (const sub of subs) {
+      const s = sub as { services?: { name: string; type: string }[] } | null;
+      if (s?.services) entries.push(...s.services);
     }
-    const matches = entries.filter((s) => /permit|building/i.test(s.name)).slice(0, 4);
-    if (matches.length === 0) notes.push(`${root}: catalog has no permit/building services`);
+    const matches = entries.filter((s) => SERVICE_RE.test(s.name)).slice(0, 5);
+    if (matches.length === 0) {
+      // Self-documenting: report what the catalog ACTUALLY contains so the
+      // next diagnostic screenshot names the real services to target.
+      const names = entries.map((e) => e.name).slice(0, 25).join(", ");
+      notes.push(`${root}: no permit-named services. Catalog: ${names}`.slice(0, 500));
+    }
     for (const s of matches) {
       const svcUrl = `${root}/rest/services/${s.name}/${s.type}`;
       try {
         const svc = (await getJson(`${svcUrl}?f=json`)) as { layers?: { id: number; name: string }[] };
-        for (const l of (svc.layers ?? []).slice(0, 5)) out.push(`${svcUrl}/${l.id}`);
+        for (const l of (svc.layers ?? []).slice(0, 6)) out.push(`${svcUrl}/${l.id}`);
       } catch (e) {
         notes.push(`${svcUrl}: ${(e as Error).message}`);
       }
@@ -168,7 +176,7 @@ async function discoverPermitLayers(root: string, notes: string[]): Promise<stri
   } catch (e) {
     notes.push(`${root}: catalog ${(e as Error).message}`);
   }
-  return out.slice(0, 8);
+  return out.slice(0, 10);
 }
 
 async function queryLayer(layerUrl: string, limit: number): Promise<{ data: ArcgisResponse; url: string }> {
