@@ -10,7 +10,6 @@
     "lint": "tsc -b --noEmit"
   },
   "dependencies": {
-    "@googlemaps/markerclusterer": "^2.6.2",
     "@hookform/resolvers": "^3.9.0",
     "@mapbox/mapbox-gl-draw": "^1.4.3",
     "@radix-ui/react-dialog": "^1.1.2",

@@ -225,7 +225,9 @@ export default function MapPage() {
         })
         .catch(() => { if (!cancelled) setLive((prev) => prev ?? { perCity: [], items: [], liveCityNames: [], liveBuildCosts: {} }); }));
     };
-    load();
+    // First paint wins: let the map + demo pins render before we start
+    // streaming megabytes of permit JSON on the same thread.
+    const kickoff = setTimeout(load, 1500);
     const timer = setInterval(load, 5 * 60_000);
 
     // MLS listings (activates the moment Bridge credentials exist server-side).
@@ -236,7 +238,7 @@ export default function MapPage() {
       if (mls.length > 0) setMlsListings(mls);
     }).catch(() => {});
 
-    return () => { cancelled = true; clearInterval(timer); };
+    return () => { cancelled = true; clearTimeout(kickoff); clearInterval(timer); };
   }, []);
 
   // National self-discovery: permits found on demand for searched places.
