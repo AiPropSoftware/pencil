@@ -1,4 +1,5 @@
 import { Routes, Route } from "react-router-dom";
+import { CrashBoundary } from "@/components/CrashBoundary";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { Toaster } from "@/components/ui/toaster";
@@ -16,6 +17,7 @@ export default function App() {
     <div className="flex min-h-screen flex-col">
       <Header />
       <main className="flex-1">
+        <CrashBoundary>
         <Routes>
           {/* Single surface: the map IS the app. */}
           <Route path="/" element={<MapPage />} />
@@ -36,6 +38,7 @@ export default function App() {
           />
           <Route path="*" element={<NotFound />} />
         </Routes>
+        </CrashBoundary>
       </main>
       <Footer />
       <Toaster />

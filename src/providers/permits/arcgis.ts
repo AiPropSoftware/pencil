@@ -189,7 +189,12 @@ function geomToLatLng(g: ArcgisGeometry | undefined): { lat: number; lng: number
   if (ring && ring.length > 2) {
     let sx = 0, sy = 0;
     for (const [x, y] of ring) { sx += x; sy += y; }
-    return { lat: sy / ring.length, lng: sx / ring.length };
+    const lat = sy / ring.length, lng = sx / ring.length;
+    // Rings can arrive in Web Mercator meters or with holes — only trust
+    // finite results that are actually plausible degrees.
+    if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+      return { lat, lng };
+    }
   }
   return null;
 }

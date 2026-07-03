@@ -73,6 +73,9 @@ export function GoogleMapView({
     const zoom = Math.round(map.getZoom() ?? 4);
     let clusters: any[] = [];
     try { clusters = index.getClusters([sw.lng(), sw.lat(), ne.lng(), ne.lat()], zoom); } catch { clusters = []; }
+    // Safety valve for dense city views on low-end machines: never flood the
+    // DOM with unbounded marker objects in a single frame.
+    if (clusters.length > 600) clusters = clusters.slice(0, 600);
 
     const keep = new Set<string>();
     for (const c of clusters) {
@@ -179,7 +182,7 @@ export function GoogleMapView({
   React.useEffect(() => {
     if (!ready) return;
     const sc = new Supercluster<{ pid: string }>({ radius: 58, maxZoom: 15 });
-    sc.load(pins.map((p) => ({
+    sc.load(pins.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)).map((p) => ({
       type: "Feature" as const,
       properties: { pid: p.id },
       geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },

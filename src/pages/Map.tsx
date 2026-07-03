@@ -31,6 +31,7 @@ import { setLiveBuildCosts, getLiveBuildCost } from "@/lib/underwrite/liveCosts"
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { toast } from "sonner";
 import { govLinksFor } from "@/data/govLinks";
+import { lendersFor, lenderSearchUrl } from "@/data/lenders";
 import {
   Search, X, ArrowRight, Building2, CalendarDays, Ruler, Layers3, TrendingUp,
   ExternalLink, HardHat, PencilRuler, Plus, Sparkles, Globe, Home, Hammer,
@@ -360,15 +361,17 @@ export default function MapPage() {
   const hasMore = visibleCount < activeList.length;
 
   const pins: Pin[] = React.useMemo(() => {
+    // A single bad coordinate from a live feed must never crash a map render.
+    const finite = (p: { lat: number; lng: number }) => Number.isFinite(p.lat) && Number.isFinite(p.lng);
     if (layer === "construction") {
-      return devMatches.map((d) => ({
+      return devMatches.filter(finite).map((d) => ({
         id: d.id, lat: d.lat, lng: d.lng, color: TYPE_COLOR[d.productType], deal: false,
         selected: selected?.kind === "dev" && selected.data.id === d.id,
         label: `${d.name} · ${d.productType}`,
         onClick: () => select({ kind: "dev", data: d }),
       }));
     }
-    return listingMatches.map((l) => ({
+    return listingMatches.filter(finite).map((l) => ({
       id: l.id, lat: l.lat, lng: l.lng, color: LISTING_COLOR[l.kind],
       deal: !!listingOpportunity(l).atPrice?.isDeal,
       selected: selected?.kind === "listing" && selected.data.id === l.id,
@@ -823,6 +826,66 @@ function InlineUnderwrite({
   );
 }
 
+/**
+ * Funding the deal — hard-money loan sizing from this exact property's
+ * numbers, plus lenders that actually cover its state.
+ */
+function FundingSection({ city, state, type, buildableSqft, landCost }: {
+  city: string; state: string; type: ProductType; buildableSqft: number; landCost: number;
+}) {
+  const area = ppsfSummary(city).current;
+  const bppsf = buildPpsf(city, type);
+  const arv = Math.round(area * buildableSqft);
+  const budget = Math.round(landCost + bppsf * buildableSqft);
+  const ltcLoan = 0.85 * budget;   // typical max: 85% loan-to-cost…
+  const arvCap = 0.70 * arv;       // …capped at ~70% of after-repair value
+  const loan = Math.round(Math.min(ltcLoan, arvCap));
+  const binding = ltcLoan <= arvCap ? "85% of cost" : "70% of ARV";
+  const cashIn = Math.round(budget - loan + loan * 0.02); // equity + ~2 pts
+  const carryMo = Math.round((loan * 0.115) / 12);        // ~11.5% interest-only
+  const lenders = lendersFor(state).slice(0, 6);
+
+  return (
+    <Section title="Fund it" tag={`hard money · ${state}`}>
+      <div className="rounded-md border border-border bg-card p-3">
+        <Row label="Project budget (land + build)" value={fmtMoney(budget)} />
+        <Row label={`Typical loan (${binding})`} value={fmtMoney(loan)} />
+        <Row label="Cash to close (equity + ~2 pts)" value={fmtMoney(Math.max(0, cashIn))} />
+        <Row label="Est. carry @ 11.5% interest-only" value={`${fmtMoney(carryMo)}/mo`} />
+      </div>
+      <div className="mt-2 space-y-1.5">
+        {lenders.map((ln) => (
+          <a
+            key={ln.name}
+            href={ln.url}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 transition-colors hover:bg-secondary"
+          >
+            <span className="min-w-0">
+              <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                <Landmark className="h-3.5 w-3.5 text-gold flex-none" /> {ln.name}
+                <ExternalLink className="h-3 w-3 text-muted-foreground flex-none" />
+              </span>
+              <span className="block truncate text-xs text-muted-foreground">{ln.focus} · {ln.loans}</span>
+            </span>
+            <Badge variant={ln.states === "nationwide" ? "secondary" : "gold"}>
+              {ln.states === "nationwide" ? "Nationwide" : `Lends in ${state}`}
+            </Badge>
+          </a>
+        ))}
+      </div>
+      <a href={lenderSearchUrl(city, state)} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-gold hover:underline">
+        Find local lenders in {city} <ExternalLink className="h-3 w-3" />
+      </a>
+      <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+        Typical published hard-money ranges: 10–13% interest-only, 1.5–3 points, 12–18-month terms,
+        draws against the build. Not offers — verify current coverage and terms with each lender. Pencil isn’t a broker.
+      </p>
+    </Section>
+  );
+}
+
 function PpsfChart({ city }: { city: string }) {
   const data = metroTrend(city);
   return (
@@ -960,6 +1023,8 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
 
         <InlineUnderwrite city={dev.city} type={dev.productType} buildableSqft={dev.buildingSqft} initialLand={Math.round(devOpportunity(dev).maxLandPrice)} address={`${dev.name}, ${dev.city}, ${dev.state}`} />
 
+        <FundingSection city={dev.city} state={dev.state} type={dev.productType} buildableSqft={dev.buildingSqft} landCost={Math.round(devOpportunity(dev).maxLandPrice)} />
+
         <Section title="Area $/sqft trend" tag={ppsf.liveSamples ? `median of ${ppsf.liveSamples.toLocaleString("en-US")} recorded sales` : "modeled from sold comps"}>
           <div className="font-display text-2xl text-gold">${ppsf.current}/sf</div>
           <div className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><TrendingUp className="h-3 w-3" /> ${ppsf.low}–${ppsf.high} range since {ppsf.since}</div>
@@ -1054,6 +1119,8 @@ function ListingPanel({ listing: l, watched, onWatch, onClose }: { listing: List
         <CityResources city={l.city} state={l.state} />
 
         <InlineUnderwrite city={l.city} type={l.productTypeIfBuilt} buildableSqft={l.buildableSqft} initialLand={l.listPrice} address={`${l.address}, ${l.city}, ${l.state}`} />
+
+        <FundingSection city={l.city} state={l.state} type={l.productTypeIfBuilt} buildableSqft={l.buildableSqft} landCost={l.listPrice} />
 
         <p className="mt-4 text-[11px] text-muted-foreground/80">
           Buildable ≈ {fmtNumber(l.buildableSqft)} sf {l.productTypeIfBuilt}. Demo listing — swaps for live MLS/ATTOM data.
