@@ -32,6 +32,7 @@ import { useWatchlist } from "@/hooks/useWatchlist";
 import { toast } from "sonner";
 import { govLinksFor } from "@/data/govLinks";
 import { lendersFor, lenderSearchUrl } from "@/data/lenders";
+import { PennyChat, type PennyContext } from "@/components/PennyChat";
 import {
   Search, X, ArrowRight, Building2, CalendarDays, Ruler, Layers3, TrendingUp,
   ExternalLink, HardHat, PencilRuler, Plus, Sparkles, Globe, Home, Hammer,
@@ -380,6 +381,40 @@ export default function MapPage() {
     }));
   }, [layer, devMatches, listingMatches, selected, select]);
 
+  // What Penny can see: the current search + the selected property's real
+  // numbers, so answers are grounded in this exact deal.
+  const pennyContext: PennyContext = React.useMemo(() => {
+    let property: Record<string, unknown> | null = null;
+    if (selected?.kind === "dev") {
+      const d = selected.data;
+      const opp = devOpportunity(d);
+      property = {
+        kind: "construction project (public-record permit)",
+        name: d.name, city: d.city, state: d.state, productType: d.productType,
+        status: d.status, units: d.units, buildingSqft: d.buildingSqft, landSqft: d.landSqft,
+        underwrite: {
+          areaSalePpsf: ppsfSummary(d.city).current, buildPpsf: opp.buildPpsf, arv: opp.arv,
+          maxLandOffer: opp.maxLandPrice, targetMargin: opp.targetMargin,
+        },
+      };
+    } else if (selected?.kind === "listing") {
+      const l = selected.data;
+      const opp = listingOpportunity(l);
+      property = {
+        kind: `listing (${l.kind})`,
+        address: l.address, city: l.city, state: l.state, listPrice: l.listPrice,
+        lotSqft: l.lotSqft, daysOnMarket: l.daysOnMarket,
+        ifRedeveloped: { productType: l.productTypeIfBuilt, buildableSqft: l.buildableSqft },
+        underwrite: {
+          areaSalePpsf: ppsfSummary(l.city).current, buildPpsf: opp.buildPpsf, arv: opp.arv,
+          maxLandOffer: opp.maxLandPrice, targetMargin: opp.targetMargin,
+          atListPrice: opp.atPrice ? { allIn: opp.atPrice.allIn, profit: opp.atPrice.profit, margin: opp.atPrice.margin, isDeal: opp.atPrice.isDeal } : null,
+        },
+      };
+    }
+    return { place, layer, property };
+  }, [selected, place, layer]);
+
   return (
     <div className="flex flex-col">
       {/* Control bar — z-index above Leaflet's panes (≤1000) so popovers never clip */}
@@ -566,6 +601,8 @@ export default function MapPage() {
           onClose={() => select(null)}
         />
       )}
+
+      <PennyChat context={pennyContext} />
     </div>
   );
 }
@@ -783,7 +820,14 @@ function InlineUnderwrite({
   const [land, setLand] = React.useState(initialLand);
   const [bppsf, setBppsf] = React.useState(buildPpsf(city, type));
   const [sale, setSale] = React.useState(Math.round(area));
-  const opp = scoreOpportunity({ city, type, buildableSqft, areaPpsf: sale, landPrice: land, buildPpsfOverride: bppsf });
+  // Blank (0) = use the modeled costs; any entry replaces the model.
+  const [finCost, setFinCost] = React.useState(0);
+  const [closingCost, setClosingCost] = React.useState(0);
+  const opp = scoreOpportunity({
+    city, type, buildableSqft, areaPpsf: sale, landPrice: land, buildPpsfOverride: bppsf,
+    finCostOverride: finCost > 0 ? finCost : undefined,
+    closingCostOverride: closingCost > 0 ? closingCost : undefined,
+  });
   const margin = opp.atPrice?.margin ?? 0;
   const deal = opp.atPrice?.isDeal;
   const href = `/deal-analyzer?arv=${opp.arv}&costPerSqft=${bppsf}&totalSqft=${buildableSqft}&landCost=${land}&productType=${encodeURIComponent(type)}&address=${encodeURIComponent(address)}`;
@@ -801,8 +845,13 @@ function InlineUnderwrite({
         <NumericField label="Build $/sf" value={bppsf} onChange={setBppsf} prefix="$" />
         <NumericField label="Sell $/sf" value={sale} onChange={setSale} prefix="$" />
       </div>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <NumericField label="Construction financing" value={finCost} onChange={setFinCost} prefix="$" />
+        <NumericField label="Closing costs" value={closingCost} onChange={setClosingCost} prefix="$" />
+      </div>
       <div className="mt-3 space-y-1">
         <Row label="Sells for (ARV)" value={fmtMoney(opp.arv)} />
+        <Row label={finCost > 0 ? "Financing (your estimate)" : "Financing (modeled ~6% of build)"} value={fmtMoney(opp.financing)} />
         <Row label="All-in cost" value={fmtMoney(opp.atPrice?.allIn ?? 0)} />
         <Row label="Profit" value={fmtMoney(opp.atPrice?.profit ?? 0)} />
         <div className="flex items-center justify-between text-sm py-1">
@@ -821,6 +870,7 @@ function InlineUnderwrite({
             : "Build $/sf: regional baseline — edit to your GC quote.";
         })()}{" "}
         Sell $/sf: area estimate — replace with your comps.
+        Financing &amp; closing: leave blank to use modeled costs (financing ≈6% of build; closing inside the 8% soft allowance) — enter your lender quote and title/closing estimate to override.
       </p>
     </div>
   );

@@ -48,6 +48,10 @@ export interface OpportunityInput {
   landPrice?: number;      // known list/ask price, if any
   targetMargin?: number;
   buildPpsfOverride?: number; // let the user override the regional estimate
+  /** User's construction-financing estimate ($) — replaces the modeled 6% of build. */
+  finCostOverride?: number;
+  /** User's closing-costs estimate ($) — pulled out of the soft allowance as its own line. */
+  closingCostOverride?: number;
 }
 
 export interface Opportunity {
@@ -83,13 +87,17 @@ export function scoreOpportunity(i: OpportunityInput): Opportunity {
   const bppsf = i.buildPpsfOverride ?? buildPpsf(i.city, i.type);
   const buildCost = bppsf * i.buildableSqft;
   const arv = Math.round(i.areaPpsf * i.buildableSqft);
-  const financing = buildCost * FINANCING_PCT;
+  const financing = i.finCostOverride ?? buildCost * FINANCING_PCT;
+  // With a user closing estimate, closing leaves the soft allowance and
+  // becomes its own explicit line (remaining soft: permits/arch/eng/contingency).
+  const softPct = i.closingCostOverride != null ? 0.06 : SOFT_PCT;
+  const closing = i.closingCostOverride ?? 0;
   const sellingCosts = arv * SELLING_PCT;
   const targetMargin = i.targetMargin ?? targetMarginFor(i.type);
 
   // Max Allowable Offer — invert margin = (arv - selling - allIn) / allIn ≥ t.
   // Approximate soft costs on build only (keeps the inversion linear).
-  const fixedCosts = buildCost + buildCost * SOFT_PCT + financing;
+  const fixedCosts = buildCost + buildCost * softPct + financing + closing;
   const netSale = arv - sellingCosts;
   const maxLandPrice = Math.max(0, netSale / (1 + targetMargin) - fixedCosts);
 
@@ -97,7 +105,7 @@ export function scoreOpportunity(i: OpportunityInput): Opportunity {
     buildPpsf: bppsf,
     buildCost: Math.round(buildCost),
     arv,
-    softCosts: Math.round((buildCost + (i.landPrice ?? maxLandPrice)) * SOFT_PCT),
+    softCosts: Math.round((buildCost + (i.landPrice ?? maxLandPrice)) * softPct + closing),
     financing: Math.round(financing),
     sellingCosts: Math.round(sellingCosts),
     targetMargin,
@@ -105,7 +113,7 @@ export function scoreOpportunity(i: OpportunityInput): Opportunity {
   };
 
   if (i.landPrice != null && i.landPrice > 0) {
-    const soft = (i.landPrice + buildCost) * SOFT_PCT;
+    const soft = (i.landPrice + buildCost) * softPct + closing;
     const allIn = i.landPrice + buildCost + soft + financing;
     const profit = arv - sellingCosts - allIn;
     const margin = allIn > 0 ? profit / allIn : 0;

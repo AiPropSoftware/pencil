@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.listings-mls]
 verify_jwt = true
+
+[functions.penny-chat]
+verify_jwt = true
