@@ -42,7 +42,7 @@ const CITY_GOV: Record<string, GovLinks> = {
     gis: "https://zola.planning.nyc.gov/",
   },
   Miami: {
-    permits: "https://ibuild.miamigov.com/",
+    permits: "https://www.miami.gov/Permits-Construction/Apply-for-or-Manage-Building-Permits-iBuild",
     zoning: "https://www.miami21.org/",
     gis: "https://www.miamidade.gov/Apps/PA/propertysearch/",
   },
@@ -54,7 +54,7 @@ const CITY_GOV: Record<string, GovLinks> = {
   "San Diego": {
     permits: "https://www.sandiego.gov/development-services",
     zoning: "https://www.sandiego.gov/development-services/zoning",
-    gis: "https://sdgis.sandag.org/",
+    gis: "https://www.sangis.org/",
   },
   "San Jose": {
     permits: "https://www.sanjoseca.gov/business/development-services-permit-center",
@@ -189,7 +189,7 @@ const CITY_GOV: Record<string, GovLinks> = {
   "Kansas City": {
     permits: "https://www.kcmo.gov/city-hall/departments/city-planning-development",
     zoning: "https://www.kcmo.gov/city-hall/departments/city-planning-development/zoning",
-    gis: "https://maps.kcmo.gov/",
+    gis: "https://www.jacksongov.org/",
   },
   "St. Louis": {
     permits: "https://www.stlouis-mo.gov/government/departments/public-safety/building/permits/",
