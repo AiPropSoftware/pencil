@@ -23,7 +23,6 @@ import { GoogleMapView } from "@/components/GoogleMapView";
 // Heavy libraries load on demand, never on first paint: Leaflet only when the
 // user switches off the Google basemap, Recharts only when a panel opens.
 const LeafletMapView = React.lazy(() => import("@/components/LeafletMapView"));
-const PpsfChart = React.lazy(() => import("@/components/DealCharts").then((m) => ({ default: m.PpsfChart })));
 const PriceHistoryChart = React.lazy(() => import("@/components/DealCharts").then((m) => ({ default: m.PriceHistoryChart })));
 import { scoreOpportunity, buildPpsf, PLAUSIBLE_MARGIN_CAP, HARD_MONEY_RATE } from "@/lib/underwrite/opportunity";
 import { setLiveBuildCosts, getLiveBuildCost } from "@/lib/underwrite/liveCosts";
@@ -777,11 +776,6 @@ function FundingSection({ city, state }: { city: string; state: string }) {
       <a href={lenderSearchUrl(city, state)} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-gold hover:underline">
         Find local lenders in {city} <ExternalLink className="h-3 w-3" />
       </a>
-      <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
-        Typical published hard-money ranges (2026): 9–15% interest-only with ground-up at the
-        higher end, 1–4 points, 12–18-month terms, draws against the build. Not offers — verify
-        current coverage and terms with each lender. Pencil isn’t a broker.
-      </p>
     </Section>
   );
 }
@@ -862,7 +856,6 @@ function ShareWatchRow({ id, watched, onWatch }: { id: string; watched: boolean;
 }
 
 function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development; watched: boolean; onWatch: () => void; onClose: () => void }) {
-  const ppsf = ppsfSummary(dev.city);
   const hasContractor = dev.developer && dev.developer !== "Permit holder on file";
   const builderHref = hasContractor
     ? `https://www.google.com/search?q=${encodeURIComponent(`${dev.developer} ${dev.city} ${dev.state} home builder`)}`
@@ -904,18 +897,6 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
         <InlineUnderwrite city={dev.city} type={dev.productType} buildableSqft={dev.buildingSqft} address={`${dev.name}, ${dev.city}, ${dev.state}`} />
 
         <FundingSection city={dev.city} state={dev.state} />
-
-        <Section title="Area $/sqft trend" tag={
-          ppsf.source === "recorded" ? `median of ${(ppsf.liveSamples ?? 0).toLocaleString("en-US")} recorded sales`
-          : ppsf.source === "calibrated" ? "Redfin-anchored · May 2026"
-          : "modeled — verify with comps"
-        }>
-          <div className="font-display text-2xl text-gold">${ppsf.current}/sf</div>
-          <div className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><TrendingUp className="h-3 w-3" /> ${ppsf.low}–${ppsf.high} range since {ppsf.since}</div>
-          <React.Suspense fallback={<div className="h-[150px]" />}>
-            <PpsfChart city={dev.city} />
-          </React.Suspense>
-        </Section>
 
         <Section title="Project team" tag="permit record">
           <div className="flex items-center justify-between text-sm py-1">
