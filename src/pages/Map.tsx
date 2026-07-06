@@ -14,11 +14,11 @@ import { Input } from "@/components/ui/input";
 import { NumericField } from "@/components/MoneyInput";
 import { fmtMoney, fmtNumber, fmtPct } from "@/lib/format";
 import {
-  developments, metroTrend, ppsfSummary, listingInfo, permitTimeline, architectFor,
-  imageFor, imageFallback, PRODUCT_TYPES, TYPE_COLOR,
+  metroTrend, ppsfSummary,
+  PRODUCT_TYPES, TYPE_COLOR,
   type Development, type ProductType,
 } from "@/data/developments";
-import { listings, LISTING_KINDS, LISTING_COLOR, type Listing, type ListingKind } from "@/data/listings";
+import { LISTING_KINDS, LISTING_COLOR, type Listing, type ListingKind } from "@/data/listings";
 import { fetchAllCityDevelopments, type LivePermits } from "@/providers/permits/socrata";
 import { fetchSoldRates } from "@/providers/sold/socrataSales";
 import { setLiveSaleRates } from "@/lib/underwrite/liveSaleRates";
@@ -35,7 +35,7 @@ import { lendersFor, lenderSearchUrl } from "@/data/lenders";
 import { PennyChat, type PennyContext } from "@/components/PennyChat";
 import {
   Search, X, ArrowRight, Building2, CalendarDays, Ruler, Layers3, TrendingUp,
-  ExternalLink, HardHat, PencilRuler, Plus, Sparkles, Globe, Home, Hammer,
+  ExternalLink, HardHat, Plus, Sparkles, Globe, Home, Hammer,
   Heart, Link2, Landmark, ScrollText,
 } from "lucide-react";
 
@@ -47,6 +47,10 @@ const PAGE = 14;
 const GOOGLE_MAPS_KEY =
   (import.meta.env.VITE_GOOGLE_MAPS_KEY as string | undefined) ||
   "AIzaSyAiF6_fZGh2obSzRVLLgIiuIBltxIVv9Wk";
+
+// Real imagery of the actual permitted address — never a stock photo.
+const streetViewImg = (lat: number, lng: number, w = 800, h = 400) =>
+  `https://maps.googleapis.com/maps/api/streetview?size=${w}x${h}&location=${lat},${lng}&fov=80&key=${GOOGLE_MAPS_KEY}`;
 
 type Layer = "construction" | "listings";
 type Selection =
@@ -248,19 +252,15 @@ export default function MapPage() {
   const [discovering, setDiscovering] = React.useState(false);
   const discoveryRan = React.useRef<Set<string>>(new Set());
 
-  // Real MLS listings replace demo listings in the cities they cover.
-  const allListings = React.useMemo(() => {
-    if (mlsListings.length === 0) return listings;
-    const liveCities = new Set(mlsListings.map((l) => l.city));
-    return [...listings.filter((l) => !liveCities.has(l.city)), ...mlsListings];
-  }, [mlsListings]);
+  // Real inventory only: listings come exclusively from the licensed MLS
+  // feed (Bridge). No feed configured → an honest empty layer, never fakes.
+  const allListings = React.useMemo(() => mlsListings, [mlsListings]);
 
   React.useEffect(() => { setVisibleCount(PAGE); }, [place, layer, typeFilter, kindFilter, dealsOnly, watchOnly]);
 
   const allDevs = React.useMemo(() => {
-    const base = (!live || live.items.length === 0)
-      ? developments
-      : [...developments.filter((d) => !live.liveCityNames.includes(d.city)), ...live.items];
+    // Real public records only: live city feeds + on-demand discovery.
+    const base = live?.items ?? [];
     const extra = Object.values(discovered).flat();
     if (extra.length === 0) return base;
     const ids = new Set(base.map((d) => d.id));
@@ -475,7 +475,7 @@ export default function MapPage() {
             </div>
           )}
           <div className="p-3 text-xs text-muted-foreground flex items-center justify-between">
-            <span>{activeList.length} {layer === "construction" ? "projects" : "listings"}{place ? ` in “${place}”` : ""}</span>
+            <span>{activeList.length} {layer === "construction" ? "real permits" : "MLS listings"}{place ? ` in “${place}”` : ""}</span>
             {!place && <span className="text-gold">Search a city to focus</span>}
           </div>
           {discovering && (
@@ -503,7 +503,29 @@ export default function MapPage() {
                     onClick={() => { const l = item as Listing; select({ kind: "listing", data: l }); setFly({ lat: l.lat, lng: l.lng }); }}
                   />,
             )}
-            {activeList.length === 0 && <p className="text-sm text-muted-foreground py-8 text-center">Nothing matches. Try another city or widen the filters.</p>}
+            {activeList.length === 0 && layer === "construction" && !live && (
+              <p className="text-sm text-muted-foreground py-8 text-center animate-pulse">
+                Connecting to live city permit records…
+              </p>
+            )}
+            {activeList.length === 0 && layer === "construction" && live && (
+              <div className="rounded-md border border-border bg-card p-4 text-sm text-muted-foreground">
+                <p className="font-medium text-foreground">Every pin on Pencil is a real permit from public records.</p>
+                <p className="mt-1.5 leading-relaxed">
+                  No records match this view yet. Search a city — Pencil hunts its official
+                  permit datasets on demand across the national open-data catalogs.
+                </p>
+              </div>
+            )}
+            {activeList.length === 0 && layer === "listings" && (
+              <div className="rounded-md border border-border bg-card p-4 text-sm text-muted-foreground">
+                <p className="font-medium text-foreground">Listings on Pencil are real MLS records only.</p>
+                <p className="mt-1.5 leading-relaxed">
+                  The licensed MLS feed (Bridge) isn’t connected yet — no fake inventory, ever.
+                  Meanwhile the Construction layer is 100% live public records.
+                </p>
+              </div>
+            )}
             {hasMore && (
               <Button variant="outline" className="w-full" onClick={() => setVisibleCount((c) => c + 20)}>
                 <Plus className="h-4 w-4" /> Show 20 more ({activeList.length - visibleCount} left)
@@ -686,7 +708,7 @@ function DevCard({ d, selected, watched, onWatch, onClick }: { d: Development; s
   return (
     <div onClick={onClick} className={`w-full cursor-pointer text-left rounded-md border bg-card overflow-hidden transition-colors hover:bg-secondary/40 ${selected ? "border-gold ring-1 ring-gold/40" : "border-border"}`}>
       <div className="flex gap-3 p-2.5">
-        <img src={imageFor(d)} onError={(e) => { const im = e.currentTarget; if (im.dataset.f !== "1") { im.dataset.f = "1"; im.src = imageFallback(d); } }} alt="" className="h-16 w-20 rounded object-cover flex-none bg-secondary" loading="lazy" />
+        <img src={streetViewImg(d.lat, d.lng, 200, 160)} onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} alt="" className="h-16 w-20 rounded object-cover flex-none bg-secondary" loading="lazy" />
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-1">
             <span className="font-medium truncate text-sm">{d.name}</span>
@@ -1033,17 +1055,15 @@ function ShareWatchRow({ id, watched, onWatch }: { id: string; watched: boolean;
 }
 
 function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development; watched: boolean; onWatch: () => void; onClose: () => void }) {
-  const listing = listingInfo(dev);
-  const permits = permitTimeline(dev);
-  const architect = architectFor(dev);
   const ppsf = ppsfSummary(dev.city);
   const builderSearch = `https://www.google.com/search?q=${encodeURIComponent(`${dev.developer} ${dev.city} ${dev.state} home builder`)}`;
 
   return (
     <Drawer onClose={onClose}>
       <div className="relative h-48 w-full bg-secondary">
-        <img src={imageFor(dev)} alt="" className="h-full w-full object-cover" loading="lazy"
-          onError={(e) => { const im = e.currentTarget; if (im.dataset.f !== "1") { im.dataset.f = "1"; im.src = imageFallback(dev); } }} />
+        <img src={streetViewImg(dev.lat, dev.lng, 1200, 480)} alt="" className="h-full w-full object-cover" loading="lazy"
+          onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+        <span className="absolute bottom-2 right-3 text-[10px] text-white/85 drop-shadow">street-level photo of the permitted address · Google</span>
         <button onClick={onClose} className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-card/90 text-foreground shadow-card hover:bg-card"><X className="h-4 w-4" /></button>
         <span className="absolute left-3 top-3"><Badge variant="gold">{dev.status}</Badge></span>
       </div>
@@ -1081,27 +1101,16 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
           <PpsfChart city={dev.city} />
         </Section>
 
-        <Section title="Listing & sale" tag="MLS / public record">
-          <Row label="Status" value={listing.status} />
-          {listing.status === "Listed for sale" && <><Row label="List price" value={fmtMoney(listing.listPrice)} /><Row label="Days on market" value={`${listing.daysOnMarket} days`} /></>}
-          {listing.status === "Recently sold" && <><Row label="Sold price" value={fmtMoney(listing.soldPrice)} /><Row label="Sold date" value={listing.soldDate ?? "—"} /></>}
-        </Section>
-
         <Section title="Project team" tag="permit record">
           <div className="flex items-center justify-between text-sm py-1">
             <span className="text-muted-foreground inline-flex items-center gap-1.5"><HardHat className="h-3.5 w-3.5" /> Developer / GC</span>
             <a href={builderSearch} target="_blank" rel="noreferrer" className="font-medium text-gold hover:underline inline-flex items-center gap-1">{dev.developer} <Globe className="h-3 w-3" /></a>
           </div>
-          <Row label={<span className="inline-flex items-center gap-1.5"><PencilRuler className="h-3.5 w-3.5" /> Architect</span>} value={architect} />
         </Section>
 
-        <Section title="Permit timeline" tag="public record">
-          <Timeline steps={[
-            { label: "Filed", date: permits.filed, done: true },
-            { label: "Approved", date: permits.approved, done: true },
-            { label: "Permit issued", date: permits.issued, done: !!permits.issued },
-            { label: "Target completion", date: permits.targetCompletion, done: dev.status === "Completed" },
-          ]} />
+        <Section title="Permit record" tag="public record">
+          <Row label="Status" value={dev.status} />
+          <Row label={<span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" /> Issued</span>} value={dev.approvedDate} />
         </Section>
 
         <CityResources city={dev.city} state={dev.state} />
@@ -1180,18 +1189,3 @@ function ListingPanel({ listing: l, watched, onWatch, onClose }: { listing: List
   );
 }
 
-function Timeline({ steps }: { steps: { label: string; date: string | null; done: boolean }[] }) {
-  return (
-    <ol className="relative ml-1.5 border-l border-border">
-      {steps.map((s) => (
-        <li key={s.label} className="mb-3 ml-4 last:mb-0">
-          <span className={`absolute -left-[5px] h-2.5 w-2.5 rounded-full ${s.done ? "bg-gold" : "bg-border"}`} />
-          <div className="flex items-center justify-between">
-            <span className={`text-sm ${s.done ? "text-foreground" : "text-muted-foreground"}`}>{s.label}</span>
-            <span className="text-xs text-muted-foreground tabular-nums">{s.date ?? "pending"}</span>
-          </div>
-        </li>
-      ))}
-    </ol>
-  );
-}
