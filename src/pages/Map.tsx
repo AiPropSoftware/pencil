@@ -31,7 +31,6 @@ import { useWatchlist } from "@/hooks/useWatchlist";
 import { toast } from "sonner";
 import { govLinksFor } from "@/data/govLinks";
 import { lendersFor, lenderSearchUrl } from "@/data/lenders";
-import { PennyChat, type PennyContext } from "@/components/PennyChat";
 import {
   Search, X, ArrowRight, Building2, CalendarDays, Ruler, Layers3, TrendingUp,
   ExternalLink, HardHat, Plus, Sparkles, Globe, Home, Hammer,
@@ -287,40 +286,6 @@ export default function MapPage() {
     }));
   }, [layer, devMatches, listingMatches, selected, select]);
 
-  // What Penny can see: the current search + the selected property's real
-  // numbers, so answers are grounded in this exact deal.
-  const pennyContext: PennyContext = React.useMemo(() => {
-    let property: Record<string, unknown> | null = null;
-    if (selected?.kind === "dev") {
-      const d = selected.data;
-      const opp = devOpportunity(d);
-      property = {
-        kind: "construction project (public-record permit)",
-        name: d.name, city: d.city, state: d.state, productType: d.productType,
-        status: d.status, units: d.units, buildingSqft: d.buildingSqft, landSqft: d.landSqft,
-        underwrite: {
-          areaSalePpsf: ppsfSummary(d.city).current, buildPpsf: opp.buildPpsf, arv: opp.arv,
-          maxLandOffer: opp.maxLandPrice, targetMargin: opp.targetMargin,
-        },
-      };
-    } else if (selected?.kind === "listing") {
-      const l = selected.data;
-      const opp = listingOpportunity(l);
-      property = {
-        kind: `listing (${l.kind})`,
-        address: l.address, city: l.city, state: l.state, listPrice: l.listPrice,
-        lotSqft: l.lotSqft, daysOnMarket: l.daysOnMarket,
-        ifRedeveloped: { productType: l.productTypeIfBuilt, buildableSqft: l.buildableSqft },
-        underwrite: {
-          areaSalePpsf: ppsfSummary(l.city).current, buildPpsf: opp.buildPpsf, arv: opp.arv,
-          maxLandOffer: opp.maxLandPrice, targetMargin: opp.targetMargin,
-          atListPrice: opp.atPrice ? { allIn: opp.atPrice.allIn, profit: opp.atPrice.profit, margin: opp.atPrice.margin, isDeal: opp.atPrice.isDeal } : null,
-        },
-      };
-    }
-    return { place, layer, property };
-  }, [selected, place, layer]);
-
   return (
     <div className="flex flex-col">
       {/* Control bar — z-index above Leaflet's panes (≤1000) so popovers never clip */}
@@ -521,7 +486,6 @@ export default function MapPage() {
         />
       )}
 
-      <PennyChat context={pennyContext} />
     </div>
   );
 }
