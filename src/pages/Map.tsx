@@ -685,14 +685,13 @@ function StreetWalk({ lat, lng }: { lat: number; lng: number }) {
   );
 }
 
-/** Editable inline underwrite — live margin + Max Allowable Offer, no page change. */
+/** Editable inline underwrite — the user supplies the numbers; no presets. */
 function InlineUnderwrite({
   city, type, buildableSqft, initialLand, address,
-}: { city: string; type: ProductType; buildableSqft: number; initialLand: number; address: string }) {
-  const area = ppsfSummary(city).current;
-  const [land, setLand] = React.useState(initialLand);
+}: { city: string; type: ProductType; buildableSqft: number; initialLand?: number; address: string }) {
+  const [land, setLand] = React.useState(initialLand ?? 0);
   const [bppsf, setBppsf] = React.useState(buildPpsf(city, type));
-  const [sale, setSale] = React.useState(Math.round(area));
+  const [sale, setSale] = React.useState(0);
   // Blank (0) = use the modeled costs; any entry replaces the model.
   const [finCost, setFinCost] = React.useState(0);
   const [closingCost, setClosingCost] = React.useState(0);
@@ -701,17 +700,13 @@ function InlineUnderwrite({
     finCostOverride: finCost > 0 ? finCost : undefined,
     closingCostOverride: closingCost > 0 ? closingCost : undefined,
   });
-  const margin = opp.atPrice?.margin ?? 0;
-  const deal = opp.atPrice?.isDeal;
+  const ready = land > 0 && sale > 0;
   const href = `/deal-analyzer?arv=${opp.arv}&costPerSqft=${bppsf}&totalSqft=${buildableSqft}&landCost=${land}&productType=${encodeURIComponent(type)}&address=${encodeURIComponent(address)}`;
 
   return (
     <div className="mt-6 rounded-md border border-gold/40 bg-gold-muted/30 p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="stat-label flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-gold" /> Underwrite it</div>
-        {margin > PLAUSIBLE_MARGIN_CAP
-          ? <Badge variant="outline" title="Margin above the plausible range — check the sell $/sf against real comps for this exact block.">Verify inputs · {fmtPct(margin)}</Badge>
-          : <Badge variant={deal ? "gold" : "secondary"}>{deal ? "Deal" : "Below target"} · {fmtPct(margin)}</Badge>}
       </div>
       <div className="grid grid-cols-3 gap-2">
         <NumericField label="Land" value={land} onChange={setLand} prefix="$" />
@@ -722,6 +717,10 @@ function InlineUnderwrite({
         <NumericField label="Construction financing" value={finCost} onChange={setFinCost} prefix="$" />
         <NumericField label="Closing costs" value={closingCost} onChange={setClosingCost} prefix="$" />
       </div>
+      {!ready && (
+        <p className="mt-3 text-xs text-muted-foreground">Enter your land price and sell $/sf to underwrite this deal.</p>
+      )}
+      {ready && (
       <div className="mt-3 space-y-1">
         <Row label="Sells for (ARV)" value={fmtMoney(opp.arv)} />
         <Row label={`Selling costs (${(opp.sellingPct * 100).toFixed(1)}% realtor + closing)`} value={fmtMoney(opp.sellingCosts)} />
@@ -739,59 +738,21 @@ function InlineUnderwrite({
           </span>
         </div>
       </div>
+      )}
       <Button variant="gold" className="w-full mt-3" asChild>
         <Link to={href}>Open full underwriting <ArrowRight className="h-4 w-4" /></Link>
       </Button>
-      <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
-        {(() => {
-          const lc = getLiveBuildCost(city);
-          return lc
-            ? `Build $/sf: median of ${lc.samples} real ${city} permits (declared valuations — builders often under-declare; edit to your GC quote).`
-            : "Build $/sf: regional baseline — edit to your GC quote.";
-        })()}{" "}
-        {(() => {
-          const src = ppsfSummary(city).source;
-          return src === "recorded" ? "Sell $/sf: median of real recorded sales — refine with block-level comps."
-            : src === "calibrated" ? "Sell $/sf: anchored to the Redfin city median (May 2026) — replace with your comps."
-            : "Sell $/sf: modeled estimate — replace with your comps.";
-        })()}{" "}
-        Construction financing: modeled as a real loan — 85% loan-to-cost at {(HARD_MONEY_RATE * 100).toFixed(1)}% interest-only
-        (2026 hard-money average; ground-up runs 11–15%) on a ~55%-drawn balance plus 2 points — enter your lender quote to override.
-        Selling costs: 5.7% average total commission (Feb 2026 agent survey) + 1% seller closing.
-        Closing costs: leave blank to keep title/escrow inside the soft allowance.
-      </p>
     </div>
   );
 }
 
-/**
- * Funding the deal — hard-money loan sizing from this exact property's
- * numbers, plus lenders that actually cover its state.
- */
-function FundingSection({ city, state, type, buildableSqft, landCost }: {
-  city: string; state: string; type: ProductType; buildableSqft: number; landCost: number;
-}) {
-  const area = ppsfSummary(city).current;
-  const bppsf = buildPpsf(city, type);
-  const arv = Math.round(area * buildableSqft);
-  const budget = Math.round(landCost + bppsf * buildableSqft);
-  const ltcLoan = 0.85 * budget;   // typical max: 85% loan-to-cost…
-  const arvCap = 0.70 * arv;       // …capped at ~70% of after-repair value
-  const loan = Math.round(Math.min(ltcLoan, arvCap));
-  const binding = ltcLoan <= arvCap ? "85% of cost" : "70% of ARV";
-  const cashIn = Math.round(budget - loan + loan * 0.02); // equity + ~2 pts
-  const carryMo = Math.round((loan * HARD_MONEY_RATE) / 12); // current-market interest-only
+/** Funding the deal — hard-money lenders that actually cover this state. */
+function FundingSection({ city, state }: { city: string; state: string }) {
   const lenders = lendersFor(state).slice(0, 6);
 
   return (
     <Section title="Fund it" tag={`hard money · ${state}`}>
-      <div className="rounded-md border border-border bg-card p-3">
-        <Row label="Project budget (land + build)" value={fmtMoney(budget)} />
-        <Row label={`Typical loan (${binding})`} value={fmtMoney(loan)} />
-        <Row label="Cash to close (equity + ~2 pts)" value={fmtMoney(Math.max(0, cashIn))} />
-        <Row label={`Est. carry @ ${(HARD_MONEY_RATE * 100).toFixed(1)}% interest-only`} value={`${fmtMoney(carryMo)}/mo`} />
-      </div>
-      <div className="mt-2 space-y-1.5">
+      <div className="space-y-1.5">
         {lenders.map((ln) => (
           <a
             key={ln.name}
@@ -902,7 +863,10 @@ function ShareWatchRow({ id, watched, onWatch }: { id: string; watched: boolean;
 
 function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development; watched: boolean; onWatch: () => void; onClose: () => void }) {
   const ppsf = ppsfSummary(dev.city);
-  const builderSearch = `https://www.google.com/search?q=${encodeURIComponent(`${dev.developer} ${dev.city} ${dev.state} home builder`)}`;
+  const hasContractor = dev.developer && dev.developer !== "Permit holder on file";
+  const builderHref = hasContractor
+    ? `https://www.google.com/search?q=${encodeURIComponent(`${dev.developer} ${dev.city} ${dev.state} home builder`)}`
+    : govLinksFor(dev.city, dev.state).permits;
 
   return (
     <Drawer onClose={onClose}>
@@ -937,9 +901,9 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
           <Metric icon={Ruler} label="Building" value={`${fmtNumber(dev.buildingSqft)} sf`} />
         </div>
 
-        <InlineUnderwrite city={dev.city} type={dev.productType} buildableSqft={dev.buildingSqft} initialLand={Math.round(devOpportunity(dev).maxLandPrice)} address={`${dev.name}, ${dev.city}, ${dev.state}`} />
+        <InlineUnderwrite city={dev.city} type={dev.productType} buildableSqft={dev.buildingSqft} address={`${dev.name}, ${dev.city}, ${dev.state}`} />
 
-        <FundingSection city={dev.city} state={dev.state} type={dev.productType} buildableSqft={dev.buildingSqft} landCost={Math.round(devOpportunity(dev).maxLandPrice)} />
+        <FundingSection city={dev.city} state={dev.state} />
 
         <Section title="Area $/sqft trend" tag={
           ppsf.source === "recorded" ? `median of ${(ppsf.liveSamples ?? 0).toLocaleString("en-US")} recorded sales`
@@ -956,7 +920,9 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
         <Section title="Project team" tag="permit record">
           <div className="flex items-center justify-between text-sm py-1">
             <span className="text-muted-foreground inline-flex items-center gap-1.5"><HardHat className="h-3.5 w-3.5" /> Developer / GC</span>
-            <a href={builderSearch} target="_blank" rel="noreferrer" className="font-medium text-gold hover:underline inline-flex items-center gap-1">{dev.developer} <Globe className="h-3 w-3" /></a>
+            <a href={builderHref} target="_blank" rel="noreferrer" className="font-medium text-gold hover:underline inline-flex items-center gap-1">
+              {hasContractor ? dev.developer : "Look up on the city permit portal"} <Globe className="h-3 w-3" />
+            </a>
           </div>
         </Section>
 
@@ -1025,7 +991,7 @@ function ListingPanel({ listing: l, watched, onWatch, onClose }: { listing: List
 
         <InlineUnderwrite city={l.city} type={l.productTypeIfBuilt} buildableSqft={l.buildableSqft} initialLand={l.listPrice} address={`${l.address}, ${l.city}, ${l.state}`} />
 
-        <FundingSection city={l.city} state={l.state} type={l.productTypeIfBuilt} buildableSqft={l.buildableSqft} landCost={l.listPrice} />
+        <FundingSection city={l.city} state={l.state} />
 
         <p className="mt-4 text-[11px] text-muted-foreground/80">
           Buildable ≈ {fmtNumber(l.buildableSqft)} sf {l.productTypeIfBuilt}. Demo listing — swaps for live MLS/ATTOM data.
