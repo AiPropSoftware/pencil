@@ -403,10 +403,11 @@ export interface PpsfPoint {
 export function metroTrend(city: string): PpsfPoint[] {
   const curated = METRO_CENTERS[city]?.ppsf ?? 350;
   const live = getLiveSaleRate(city);
-  const lastFactor = 0.8 + (QUARTERS.length - 1) * 0.029;
-  const base = live ? live.ppsf / lastFactor : curated;
+  // Curve factors end at exactly 1.0 so the latest quarter (and everything
+  // derived from it) equals the calibrated/recorded figure to the dollar.
+  const base = live ? live.ppsf : curated;
   return QUARTERS.map((quarter, i) => {
-    const ppsf = Math.round(base * (0.8 + i * 0.029));
+    const ppsf = Math.round(base * (0.797 + i * 0.029));
     return { quarter, ppsf, low: Math.round(ppsf * 0.87), high: Math.round(ppsf * 1.13) };
   });
 }
