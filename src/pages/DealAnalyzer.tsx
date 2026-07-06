@@ -272,7 +272,7 @@ function Results({ inputs, r, strategy }: { inputs: DealInputs; r: DealResults; 
           <Stat label="All-in cost" value={fmtMoney(r.allInCost)} big />
           <Stat label="ARV" value={fmtMoney(inputs.arv)} big />
           <Stat label="Cash required" value={fmtMoney(r.cashRequired)} />
-          <Stat label="Projected profit" value={fmtMoney(r.projectedProfit)} accent />
+          <Stat label="Projected profit" value={fmtMoney(r.projectedProfit)} tone={r.projectedProfit >= 0 ? "profit" : "loss"} />
         </CardContent>
       </Card>
 
@@ -299,7 +299,7 @@ function Results({ inputs, r, strategy }: { inputs: DealInputs; r: DealResults; 
             <Row label="Net sale proceeds" value={fmtMoney(r.netSaleProceeds)} />
             <Row label="All-in cost" value={fmtMoney(-r.allInCost)} />
             <Separator className="my-2" />
-            <Row label="Projected profit" value={fmtMoney(r.projectedProfit)} accent />
+            <Row label="Projected profit" value={fmtMoney(r.projectedProfit)} tone={r.projectedProfit >= 0 ? "profit" : "loss"} />
             <Row label="Profit margin" value={fmtPct(r.profitMargin)} />
             <Row label="Return on cash" value={fmtPct(r.cashRequired > 0 ? r.projectedProfit / r.cashRequired : 0)} accent />
           </CardContent>
@@ -355,22 +355,26 @@ function Results({ inputs, r, strategy }: { inputs: DealInputs; r: DealResults; 
   );
 }
 
-function Stat({ label, value, big, accent }: { label: string; value: string; big?: boolean; accent?: boolean }) {
+type Tone = "profit" | "loss";
+const toneClass = (tone?: Tone, accent?: boolean) =>
+  tone === "profit" ? "text-emerald-600" : tone === "loss" ? "text-red-600" : accent ? "text-gold" : "text-foreground";
+
+function Stat({ label, value, big, accent, tone }: { label: string; value: string; big?: boolean; accent?: boolean; tone?: Tone }) {
   return (
     <div className="rounded-md border border-border bg-secondary/40 p-3">
       <div className="stat-label">{label}</div>
-      <div className={`mt-1 font-display ${big ? "text-3xl" : "text-2xl"} ${accent ? "text-gold" : "text-foreground"}`}>
+      <div className={`mt-1 font-display ${big ? "text-3xl" : "text-2xl"} ${toneClass(tone, accent)}`}>
         {value}
       </div>
     </div>
   );
 }
 
-function Row({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function Row({ label, value, accent, tone }: { label: string; value: string; accent?: boolean; tone?: Tone }) {
   return (
     <div className="flex items-center justify-between text-sm py-1">
       <span className="text-muted-foreground">{label}</span>
-      <span className={`font-medium tabular-nums ${accent ? "text-gold" : "text-foreground"}`}>{value}</span>
+      <span className={`font-medium tabular-nums ${toneClass(tone, accent)}`}>{value}</span>
     </div>
   );
 }

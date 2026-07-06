@@ -1,12 +1,5 @@
 import * as React from "react";
-import { MapContainer, TileLayer, CircleMarker, Marker, Tooltip, useMap, useMapEvents } from "react-leaflet";
-import L from "leaflet";
-import Supercluster from "supercluster";
-import "leaflet/dist/leaflet.css";
 import { Link } from "react-router-dom";
-import {
-  ComposedChart, Area, Line, XAxis, YAxis, Tooltip as RTooltip, CartesianGrid, ResponsiveContainer,
-} from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +19,13 @@ import { fetchMlsListings } from "@/providers/listings/mls";
 import { discoverCityPermits } from "@/providers/permits/discovery";
 import { geocodeVerify } from "@/lib/googleMaps";
 import { GoogleMapView } from "@/components/GoogleMapView";
-import { scoreOpportunity, buildPpsf, PLAUSIBLE_MARGIN_CAP } from "@/lib/underwrite/opportunity";
+
+// Heavy libraries load on demand, never on first paint: Leaflet only when the
+// user switches off the Google basemap, Recharts only when a panel opens.
+const LeafletMapView = React.lazy(() => import("@/components/LeafletMapView"));
+const PpsfChart = React.lazy(() => import("@/components/DealCharts").then((m) => ({ default: m.PpsfChart })));
+const PriceHistoryChart = React.lazy(() => import("@/components/DealCharts").then((m) => ({ default: m.PriceHistoryChart })));
+import { scoreOpportunity, buildPpsf, PLAUSIBLE_MARGIN_CAP, HARD_MONEY_RATE } from "@/lib/underwrite/opportunity";
 import { setLiveBuildCosts, getLiveBuildCost } from "@/lib/underwrite/liveCosts";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { toast } from "sonner";
@@ -39,8 +38,6 @@ import {
   Heart, Link2, Landmark, ScrollText,
 } from "lucide-react";
 
-const US_CENTER: [number, number] = [39.5, -98.35];
-const US_ZOOM = 4.4;
 const PAGE = 14;
 // Domain-restricted public client key (env var overrides). Unlocks the
 // embedded Street View panorama + Google geocoder pin cross-checks.
@@ -69,98 +66,7 @@ interface Pin {
   onClick: () => void;
 }
 
-// ── Map helpers ─────────────────────────────────────────────────────────────
-function FitOnPlace({ place, points }: { place: string; points: { lat: number; lng: number }[] }) {
-  const map = useMap();
-  const ref = React.useRef(points);
-  ref.current = points;
-  React.useEffect(() => {
-    const pts = ref.current;
-    if (!place) { map.flyTo(US_CENTER, US_ZOOM, { duration: 0.6 }); return; }
-    if (pts.length === 0) return;
-    if (pts.length === 1) { map.flyTo([pts[0].lat, pts[0].lng], 12, { duration: 0.8 }); return; }
-    let minLat = Infinity, minLng = Infinity, maxLat = -Infinity, maxLng = -Infinity;
-    for (const p of pts) {
-      minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat);
-      minLng = Math.min(minLng, p.lng); maxLng = Math.max(maxLng, p.lng);
-    }
-    map.fitBounds([[minLat, minLng], [maxLat, maxLng]], { padding: [60, 60], maxZoom: 13, duration: 0.8 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [place]);
-  return null;
-}
 
-function Clusters({ pins }: { pins: Pin[] }) {
-  const [view, setView] = React.useState<{ bbox: [number, number, number, number]; zoom: number } | null>(null);
-  const map = useMapEvents({ moveend: () => sync(), zoomend: () => sync() });
-  function sync() {
-    const b = map.getBounds();
-    setView({ bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], zoom: map.getZoom() });
-  }
-  React.useEffect(() => { sync(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const byId = React.useMemo(() => {
-    const m = new Map<string, Pin>();
-    pins.forEach((p) => m.set(p.id, p));
-    return m;
-  }, [pins]);
-
-  const index = React.useMemo(() => {
-    const sc = new Supercluster<{ pid: string }>({ radius: 58, maxZoom: 15 });
-    sc.load(pins.map((p) => ({
-      type: "Feature" as const,
-      properties: { pid: p.id },
-      geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
-    })));
-    return sc;
-  }, [pins]);
-
-  const clusters = React.useMemo(() => {
-    if (!view) return [];
-    try { return index.getClusters(view.bbox, Math.floor(view.zoom)); } catch { return []; }
-  }, [index, view]);
-
-  return (
-    <>
-      {clusters.map((c) => {
-        const [lng, lat] = c.geometry.coordinates;
-        const props = c.properties as { cluster?: boolean; point_count?: number; pid?: string };
-        if (props.cluster) {
-          const count = props.point_count ?? 0;
-          const size = Math.round(32 + Math.min(30, Math.log2(count + 1) * 8));
-          const icon = L.divIcon({
-            className: "",
-            iconSize: [size, size],
-            html: `<div style="width:${size}px;height:${size}px;border-radius:9999px;display:flex;align-items:center;justify-content:center;background:rgba(200,165,92,0.92);color:#1a1612;font-weight:600;font-size:12px;border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.25)">${count}</div>`,
-          });
-          return (
-            <Marker key={`c-${c.id}`} position={[lat, lng]} icon={icon} eventHandlers={{
-              click: () => map.flyTo([lat, lng], Math.min(index.getClusterExpansionZoom(c.id as number), 16), { duration: 0.6 }),
-            }} />
-          );
-        }
-        const pin = byId.get(props.pid as string);
-        if (!pin) return null;
-        return (
-          <CircleMarker
-            key={pin.id}
-            center={[lat, lng]}
-            radius={pin.selected ? 11 : 7}
-            pathOptions={{
-              color: pin.deal ? "#c8a55c" : "#fff",
-              weight: pin.deal ? 3 : 2,
-              fillColor: pin.color,
-              fillOpacity: pin.selected ? 1 : 0.85,
-            }}
-            eventHandlers={{ click: pin.onClick }}
-          >
-            <Tooltip direction="top" offset={[0, -6]}><span className="text-xs">{pin.label}</span></Tooltip>
-          </CircleMarker>
-        );
-      })}
-    </>
-  );
-}
 
 // ── X-ray computation shared by cards + panels ──────────────────────────────
 function devOpportunity(d: Development) {
@@ -549,24 +455,15 @@ export default function MapPage() {
               }}
             />
           ) : (
-            <MapContainer center={US_CENTER} zoom={US_ZOOM} scrollWheelZoom className="h-full w-full" style={{ background: "#eae5db" }}>
-              {basemap === "streets" ? (
-                <TileLayer
-                  key="streets"
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                  url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                />
-              ) : (
-                <TileLayer
-                  key="satellite"
-                  attribution="Esri, Maxar, Earthstar Geographics"
-                  url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                />
-              )}
-              <FitOnPlace place={place} points={activeList.map((p) => ({ lat: p.lat, lng: p.lng }))} />
-              <FlyToTarget target={fly} />
-              <Clusters pins={pins} />
-            </MapContainer>
+            <React.Suspense fallback={<div className="grid h-full w-full place-items-center text-sm text-muted-foreground animate-pulse">Loading map…</div>}>
+              <LeafletMapView
+                basemap={basemap === "satellite" ? "satellite" : "streets"}
+                pins={pins}
+                fly={fly}
+                place={place}
+                fitPoints={activeList.map((p) => ({ lat: p.lat, lng: p.lng }))}
+              />
+            </React.Suspense>
           )}
           {(live?.liveCityNames.length ?? 0) > 0 && (
             <div className="absolute top-3 left-3 z-[1000] flex items-center gap-2 rounded-md border border-border bg-card/95 px-2.5 py-1.5 text-[11px] font-medium text-foreground/80 shadow-card backdrop-blur">
@@ -643,14 +540,6 @@ function PulsingDot({ tone = "bg-gold" }: { tone?: string }) {
   );
 }
 
-/** Fly the map to a picked property (rail click / deep link). */
-function FlyToTarget({ target }: { target: { lat: number; lng: number } | null }) {
-  const map = useMap();
-  React.useEffect(() => {
-    if (target) map.flyTo([target.lat, target.lng], 14, { duration: 0.8 });
-  }, [target, map]);
-  return null;
-}
 
 /** Pure status light — details go to the developer console, not the UI. */
 function LiveStatusChip({ live, lastUpdated }: { live: LivePermits | null; lastUpdated: number | null }) {
@@ -703,7 +592,6 @@ function WatchHeart({ watched, onWatch }: { watched: boolean; onWatch: () => voi
 }
 
 function DevCard({ d, selected, watched, onWatch, onClick }: { d: Development; selected: boolean; watched: boolean; onWatch: () => void; onClick: () => void }) {
-  const opp = devOpportunity(d);
   const isLive = d.id.startsWith("live-");
   return (
     <div onClick={onClick} className={`w-full cursor-pointer text-left rounded-md border bg-card overflow-hidden transition-colors hover:bg-secondary/40 ${selected ? "border-gold ring-1 ring-gold/40" : "border-border"}`}>
@@ -718,9 +606,8 @@ function DevCard({ d, selected, watched, onWatch, onClick }: { d: Development; s
             </span>
           </div>
           <div className="text-xs text-muted-foreground">{d.city}, {d.state} · {d.units}u · {d.status}</div>
-          <div className="mt-1 text-xs">
-            <span className="text-muted-foreground">Max land offer </span>
-            <span className="text-gold font-medium">{fmtMoney(opp.maxLandPrice)}</span>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {fmtNumber(d.buildingSqft)} sf building · {fmtNumber(d.landSqft)} sf lot
           </div>
         </div>
       </div>
@@ -873,12 +760,19 @@ function InlineUnderwrite({
       </div>
       <div className="mt-3 space-y-1">
         <Row label="Sells for (ARV)" value={fmtMoney(opp.arv)} />
-        <Row label={finCost > 0 ? "Financing (your estimate)" : "Financing (modeled ~6% of build)"} value={fmtMoney(opp.financing)} />
+        <Row label={`Selling costs (${(opp.sellingPct * 100).toFixed(1)}% realtor + closing)`} value={fmtMoney(opp.sellingCosts)} />
+        <Row
+          label={finCost > 0
+            ? "Construction financing (your quote)"
+            : `Construction financing (85% LTC @ ${(HARD_MONEY_RATE * 100).toFixed(1)}% · ${opp.finMonths} mo + 2 pts)`}
+          value={fmtMoney(opp.financing)}
+        />
         <Row label="All-in cost" value={fmtMoney(opp.atPrice?.allIn ?? 0)} />
-        <Row label="Profit" value={fmtMoney(opp.atPrice?.profit ?? 0)} />
         <div className="flex items-center justify-between text-sm py-1">
-          <span className="text-muted-foreground">Max land offer ({fmtPct(opp.targetMargin)})</span>
-          <span className="font-medium text-gold tabular-nums">{fmtMoney(opp.maxLandPrice)}</span>
+          <span className="text-muted-foreground">Profit</span>
+          <span className={`font-semibold tabular-nums ${(opp.atPrice?.profit ?? 0) >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+            {fmtMoney(opp.atPrice?.profit ?? 0)}
+          </span>
         </div>
       </div>
       <Button variant="gold" className="w-full mt-3" asChild>
@@ -897,7 +791,10 @@ function InlineUnderwrite({
             : src === "calibrated" ? "Sell $/sf: anchored to the Redfin city median (May 2026) — replace with your comps."
             : "Sell $/sf: modeled estimate — replace with your comps.";
         })()}{" "}
-        Financing &amp; closing: leave blank to use modeled costs (financing ≈6% of build; closing inside the 8% soft allowance) — enter your lender quote and title/closing estimate to override.
+        Construction financing: modeled as a real loan — 85% loan-to-cost at {(HARD_MONEY_RATE * 100).toFixed(1)}% interest-only
+        (2026 hard-money average; ground-up runs 11–15%) on a ~55%-drawn balance plus 2 points — enter your lender quote to override.
+        Selling costs: 5.7% average total commission (Feb 2026 agent survey) + 1% seller closing.
+        Closing costs: leave blank to keep title/escrow inside the soft allowance.
       </p>
     </div>
   );
@@ -919,7 +816,7 @@ function FundingSection({ city, state, type, buildableSqft, landCost }: {
   const loan = Math.round(Math.min(ltcLoan, arvCap));
   const binding = ltcLoan <= arvCap ? "85% of cost" : "70% of ARV";
   const cashIn = Math.round(budget - loan + loan * 0.02); // equity + ~2 pts
-  const carryMo = Math.round((loan * 0.115) / 12);        // ~11.5% interest-only
+  const carryMo = Math.round((loan * HARD_MONEY_RATE) / 12); // current-market interest-only
   const lenders = lendersFor(state).slice(0, 6);
 
   return (
@@ -928,7 +825,7 @@ function FundingSection({ city, state, type, buildableSqft, landCost }: {
         <Row label="Project budget (land + build)" value={fmtMoney(budget)} />
         <Row label={`Typical loan (${binding})`} value={fmtMoney(loan)} />
         <Row label="Cash to close (equity + ~2 pts)" value={fmtMoney(Math.max(0, cashIn))} />
-        <Row label="Est. carry @ 11.5% interest-only" value={`${fmtMoney(carryMo)}/mo`} />
+        <Row label={`Est. carry @ ${(HARD_MONEY_RATE * 100).toFixed(1)}% interest-only`} value={`${fmtMoney(carryMo)}/mo`} />
       </div>
       <div className="mt-2 space-y-1.5">
         {lenders.map((ln) => (
@@ -964,29 +861,6 @@ function FundingSection({ city, state, type, buildableSqft, landCost }: {
   );
 }
 
-function PpsfChart({ city }: { city: string }) {
-  const data = metroTrend(city);
-  return (
-    <ResponsiveContainer width="100%" height={150}>
-      <ComposedChart data={data} margin={{ top: 8, right: 6, bottom: 0, left: -20 }}>
-        <defs>
-          <linearGradient id="ppsf" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="hsl(38 48% 52%)" stopOpacity={0.35} />
-            <stop offset="100%" stopColor="hsl(38 48% 52%)" stopOpacity={0.02} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(30 15% 88%)" vertical={false} />
-        <XAxis dataKey="quarter" tick={{ fontSize: 10 }} interval={1} />
-        <YAxis tick={{ fontSize: 10 }} width={46} tickFormatter={(v) => `$${v}`} />
-        <RTooltip formatter={(v: number) => [`$${v}/sf`, ""]} contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid hsl(30 15% 86%)" }} />
-        <Area type="monotone" dataKey="high" stroke="none" fill="url(#ppsf)" />
-        <Line type="monotone" dataKey="high" stroke="hsl(25 10% 65%)" strokeWidth={1} strokeDasharray="3 3" dot={false} />
-        <Line type="monotone" dataKey="low" stroke="hsl(25 10% 65%)" strokeWidth={1} strokeDasharray="3 3" dot={false} />
-        <Line type="monotone" dataKey="ppsf" stroke="hsl(38 48% 42%)" strokeWidth={2} dot={false} />
-      </ComposedChart>
-    </ResponsiveContainer>
-  );
-}
 
 // ── Construction panel ──────────────────────────────────────────────────────
 /** One-click city/county resources: permit portal, zoning code, parcel GIS. */
@@ -1019,7 +893,9 @@ function CityResources({ city, state }: { city: string; state: string }) {
 function GeocoderCheck({ dev }: { dev: Development }) {
   const [dist, setDist] = React.useState<number | null>(null);
   React.useEffect(() => {
-    if (!GOOGLE_MAPS_KEY || !dev.id.startsWith("live-") || !dev.name || dev.name.length < 8) return;
+    // Only cross-check real street addresses (must contain a street number) —
+    // generic names like "SFH — Miami" geocode to the city center and mislead.
+    if (!GOOGLE_MAPS_KEY || !dev.id.startsWith("live-") || !dev.name || dev.name.length < 8 || !/\d/.test(dev.name)) return;
     let cancelled = false;
     geocodeVerify(GOOGLE_MAPS_KEY, `${dev.name}, ${dev.city}, ${dev.state}`, dev.lat, dev.lng)
       .then((r) => { if (!cancelled && r) setDist(r.distanceM); });
@@ -1108,7 +984,9 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
         }>
           <div className="font-display text-2xl text-gold">${ppsf.current}/sf</div>
           <div className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><TrendingUp className="h-3 w-3" /> ${ppsf.low}–${ppsf.high} range since {ppsf.since}</div>
-          <PpsfChart city={dev.city} />
+          <React.Suspense fallback={<div className="h-[150px]" />}>
+            <PpsfChart city={dev.city} />
+          </React.Suspense>
         </Section>
 
         <Section title="Project team" tag="permit record">
@@ -1166,15 +1044,9 @@ function ListingPanel({ listing: l, watched, onWatch, onClose }: { listing: List
         </div>
 
         <Section title="Price history" tag="public record">
-          <ResponsiveContainer width="100%" height={130}>
-            <ComposedChart data={priceData} margin={{ top: 8, right: 6, bottom: 0, left: -10 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(30 15% 88%)" vertical={false} />
-              <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-              <YAxis tick={{ fontSize: 10 }} width={54} tickFormatter={(v) => `$${Math.round(v / 1000)}k`} />
-              <RTooltip formatter={(v: number) => [fmtMoney(v), ""]} contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid hsl(30 15% 86%)" }} />
-              <Line type="monotone" dataKey="price" stroke="hsl(38 48% 42%)" strokeWidth={2} dot={{ r: 3 }} />
-            </ComposedChart>
-          </ResponsiveContainer>
+          <React.Suspense fallback={<div className="h-[130px]" />}>
+            <PriceHistoryChart data={priceData} />
+          </React.Suspense>
           <div className="space-y-1 mt-1">
             {l.priceHistory.map((p, i) => (
               <div key={i} className="flex items-center justify-between text-xs">

@@ -53,13 +53,13 @@ export const defaultDeal: DealInputs = {
   totalSqft: 3200,
   closingCostsPct: 0.02,
   lenderFeesPct: 0.02,
-  constructionRate: 0.105,
+  constructionRate: 0.115, // 2026 ground-up hard-money average (published range 11–15%)
   monthsToBuild: 10,
   ltcPct: 0.80,
   arv: 1_250_000,
 
   applySellingCosts: false,
-  salesCommissionPct: 0.05,
+  salesCommissionPct: 0.057, // avg total commission, Feb-2026 agent survey
   saleClosingPct: 0.01,
 
   refiEnabled: true,

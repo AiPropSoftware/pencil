@@ -1,3 +1,4 @@
+import * as React from "react";
 import { Routes, Route } from "react-router-dom";
 import { CrashBoundary } from "@/components/CrashBoundary";
 import { Header } from "@/components/Header";
@@ -5,12 +6,18 @@ import { Footer } from "@/components/Footer";
 import { Toaster } from "@/components/ui/toaster";
 import { RequireAuth } from "@/components/RequireAuth";
 import MapPage from "@/pages/Map";
-import DealAnalyzer from "@/pages/DealAnalyzer";
-import SignIn from "@/pages/SignIn";
-import SignUp from "@/pages/SignUp";
-import Admin from "@/pages/Admin";
-import BillingSuccess from "@/pages/BillingSuccess";
-import NotFound from "@/pages/NotFound";
+
+// The map IS the app — every other page lazy-loads off the critical path.
+const DealAnalyzer = React.lazy(() => import("@/pages/DealAnalyzer"));
+const SignIn = React.lazy(() => import("@/pages/SignIn"));
+const SignUp = React.lazy(() => import("@/pages/SignUp"));
+const Admin = React.lazy(() => import("@/pages/Admin"));
+const BillingSuccess = React.lazy(() => import("@/pages/BillingSuccess"));
+const NotFound = React.lazy(() => import("@/pages/NotFound"));
+
+const PageFallback = () => (
+  <div className="grid min-h-[50vh] place-items-center text-sm text-muted-foreground animate-pulse">Loading…</div>
+);
 
 export default function App() {
   return (
@@ -18,6 +25,7 @@ export default function App() {
       <Header />
       <main className="flex-1">
         <CrashBoundary>
+        <React.Suspense fallback={<PageFallback />}>
         <Routes>
           {/* Single surface: the map IS the app. */}
           <Route path="/" element={<MapPage />} />
@@ -38,6 +46,7 @@ export default function App() {
           />
           <Route path="*" element={<NotFound />} />
         </Routes>
+        </React.Suspense>
         </CrashBoundary>
       </main>
       <Footer />

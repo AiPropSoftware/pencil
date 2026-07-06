@@ -59,8 +59,12 @@ export interface Opportunity {
   buildCost: number;
   arv: number;
   softCosts: number;       // closing, permits, arch/eng, contingency
-  financing: number;       // fees + carry (rough)
-  sellingCosts: number;    // commission + sale closing
+  financing: number;       // real derivation: LTC loan × rate × drawn balance + points
+  sellingCosts: number;    // realtor commission + seller closing
+  /** % of ARV deducted on sale (commission + closing) — for display. */
+  sellingPct: number;
+  /** Build duration assumption behind the financing figure — for display. */
+  finMonths: number;
   targetMargin: number;
   /** Most you can pay for the land and still hit the target margin. */
   maxLandPrice: number;
@@ -73,9 +77,31 @@ export interface Opportunity {
   };
 }
 
-const SOFT_PCT = 0.08;      // % of (land + build)
-const FINANCING_PCT = 0.06; // % of build (fees + carry proxy)
-const SELLING_PCT = 0.06;   // commission + sale closing
+const SOFT_PCT = 0.08;      // % of (land + build): permits, arch/eng, contingency
+
+// ── 2026 market constants (update as the market moves) ─────────────────────
+/** Avg total realtor commission — Clever Feb-2026 agent survey: 5.70%. */
+const REALTOR_COMMISSION = 0.057;
+/** Seller-side closing beyond commission (title, transfer, escrow). */
+const SALE_CLOSING = 0.01;
+const SELLING_PCT = REALTOR_COMMISSION + SALE_CLOSING;
+/** Ground-up hard money, 2026 published range 11–15% interest-only — midpoint. */
+export const HARD_MONEY_RATE = 0.115;
+export const HARD_MONEY_POINTS = 0.02;
+const FIN_LTC = 0.85;       // typical max loan-to-cost
+const AVG_DRAWN = 0.55;     // construction draws → average outstanding balance
+
+/** Typical ground-up build duration by product (months). */
+export function buildMonthsFor(type: ProductType): number {
+  switch (type) {
+    case "SFH":
+    case "Infill": return 9;
+    case "Duplex": return 10;
+    case "Townhomes": return 11;
+    case "Fourplex": return 12;
+    default: return 14;
+  }
+}
 
 /**
  * Margins above this are almost always an input problem (area $/sf that
@@ -87,37 +113,50 @@ export function scoreOpportunity(i: OpportunityInput): Opportunity {
   const bppsf = i.buildPpsfOverride ?? buildPpsf(i.city, i.type);
   const buildCost = bppsf * i.buildableSqft;
   const arv = Math.round(i.areaPpsf * i.buildableSqft);
-  const financing = i.finCostOverride ?? buildCost * FINANCING_PCT;
   // With a user closing estimate, closing leaves the soft allowance and
   // becomes its own explicit line (remaining soft: permits/arch/eng/contingency).
   const softPct = i.closingCostOverride != null ? 0.06 : SOFT_PCT;
   const closing = i.closingCostOverride ?? 0;
+  const months = buildMonthsFor(i.type);
+  // Financing as a real loan: 85% LTC on total project cost, interest-only at
+  // the current hard-money rate on the average drawn balance, plus points.
+  // k folds it into a multiplier on cost so the max-land inversion stays exact.
+  const k = i.finCostOverride != null
+    ? 0
+    : FIN_LTC * (HARD_MONEY_RATE * (months / 12) * AVG_DRAWN + HARD_MONEY_POINTS);
   const sellingCosts = arv * SELLING_PCT;
+  const netSale = arv - sellingCosts;
   const targetMargin = i.targetMargin ?? targetMarginFor(i.type);
 
-  // Max Allowable Offer — invert margin = (arv - selling - allIn) / allIn ≥ t.
-  // Approximate soft costs on build only (keeps the inversion linear).
-  const fixedCosts = buildCost + buildCost * softPct + financing + closing;
-  const netSale = arv - sellingCosts;
-  const maxLandPrice = Math.max(0, netSale / (1 + targetMargin) - fixedCosts);
+  // Max Allowable Offer — solve margin = (netSale − allIn)/allIn ≥ t for land:
+  // allIn = (L+B)(1+soft)(1+k) + closing(1+k) + finOverride
+  const maxLandPrice = Math.max(
+    0,
+    (netSale / (1 + targetMargin) - closing * (1 + k) - (i.finCostOverride ?? 0)) / ((1 + softPct) * (1 + k)) - buildCost,
+  );
+
+  const price = i.landPrice != null && i.landPrice > 0 ? i.landPrice : maxLandPrice;
+  const soft = (price + buildCost) * softPct;
+  const preFinancing = price + buildCost + soft + closing;
+  const financing = i.finCostOverride ?? preFinancing * k;
 
   const out: Opportunity = {
     buildPpsf: bppsf,
     buildCost: Math.round(buildCost),
     arv,
-    softCosts: Math.round((buildCost + (i.landPrice ?? maxLandPrice)) * softPct + closing),
+    softCosts: Math.round(soft + closing),
     financing: Math.round(financing),
     sellingCosts: Math.round(sellingCosts),
+    sellingPct: SELLING_PCT,
+    finMonths: months,
     targetMargin,
     maxLandPrice: Math.round(maxLandPrice),
   };
 
   if (i.landPrice != null && i.landPrice > 0) {
-    const soft = (i.landPrice + buildCost) * softPct + closing;
-    const allIn = i.landPrice + buildCost + soft + financing;
-    const profit = arv - sellingCosts - allIn;
+    const allIn = preFinancing + financing;
+    const profit = netSale - allIn;
     const margin = allIn > 0 ? profit / allIn : 0;
-    out.softCosts = Math.round(soft);
     out.atPrice = {
       allIn: Math.round(allIn),
       profit: Math.round(profit),
