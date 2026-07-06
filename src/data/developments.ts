@@ -87,13 +87,13 @@ export const METRO_CENTERS: Record<string, MetroCenter> = {
   // (May 2026) × ~1.2 new-build premium. Verified metros note the real median;
   // recorded-deed feeds (liveSaleRates) override these wherever cities publish.
   Austin: { lat: 30.27, lng: -97.74, state: "TX", ppsf: 390 }, // Redfin median $320/sf
-  Dallas: { lat: 32.78, lng: -96.80, state: "TX", ppsf: 360 },
-  Houston: { lat: 29.76, lng: -95.37, state: "TX", ppsf: 320 },
-  Phoenix: { lat: 33.45, lng: -112.07, state: "AZ", ppsf: 360 },
-  Denver: { lat: 39.74, lng: -104.99, state: "CO", ppsf: 520 },
-  Nashville: { lat: 36.16, lng: -86.78, state: "TN", ppsf: 420 },
-  Atlanta: { lat: 33.75, lng: -84.39, state: "GA", ppsf: 360 },
-  Tampa: { lat: 27.95, lng: -82.46, state: "FL", ppsf: 360, coast: "E" },
+  Dallas: { lat: 32.78, lng: -96.80, state: "TX", ppsf: 310 },   // Redfin median $259/sf (East Dallas infill $391)
+  Houston: { lat: 29.76, lng: -95.37, state: "TX", ppsf: 240 },  // Redfin median $182/sf (inner-loop infill $260–300)
+  Phoenix: { lat: 33.45, lng: -112.07, state: "AZ", ppsf: 335 }, // Redfin median $279/sf
+  Denver: { lat: 39.74, lng: -104.99, state: "CO", ppsf: 430 },  // Redfin median $357/sf
+  Nashville: { lat: 36.16, lng: -86.78, state: "TN", ppsf: 330 }, // Redfin median $276/sf (East Nashville $327)
+  Atlanta: { lat: 33.75, lng: -84.39, state: "GA", ppsf: 345 },  // Redfin median $289/sf
+  Tampa: { lat: 27.95, lng: -82.46, state: "FL", ppsf: 355, coast: "E" }, // Redfin median $298/sf
   Miami: { lat: 25.76, lng: -80.19, state: "FL", ppsf: 650, coast: "NW", scatterScale: 0.8 }, // Redfin median $531/sf; luxury segment runs $1,200+ — edit Sell $/sf per deal
   Charlotte: { lat: 35.23, lng: -80.84, state: "NC", ppsf: 360 },
   Raleigh: { lat: 35.78, lng: -78.64, state: "NC", ppsf: 360 },
@@ -109,8 +109,8 @@ export const METRO_CENTERS: Record<string, MetroCenter> = {
   "San Jose": { lat: 37.34, lng: -121.89, state: "CA", ppsf: 800 },
   Oakland: { lat: 37.80, lng: -122.27, state: "CA", ppsf: 720, coast: "E" },
   Sacramento: { lat: 38.58, lng: -121.49, state: "CA", ppsf: 480 },
-  "Los Angeles": { lat: 34.05, lng: -118.24, state: "CA", ppsf: 720 },
-  "San Diego": { lat: 32.72, lng: -117.16, state: "CA", ppsf: 700, coast: "E" },
+  "Los Angeles": { lat: 34.05, lng: -118.24, state: "CA", ppsf: 780 }, // Redfin median $648/sf
+  "San Diego": { lat: 32.72, lng: -117.16, state: "CA", ppsf: 840, coast: "E" }, // Redfin median $701/sf
   "Long Beach": { lat: 33.77, lng: -118.19, state: "CA", ppsf: 650, coast: "N" },
   Irvine: { lat: 33.68, lng: -117.83, state: "CA", ppsf: 700 },
   Riverside: { lat: 33.95, lng: -117.40, state: "CA", ppsf: 400 },
@@ -136,7 +136,7 @@ export const METRO_CENTERS: Record<string, MetroCenter> = {
   Billings: { lat: 45.78, lng: -108.50, state: "MT", ppsf: 300 },
   Cheyenne: { lat: 41.14, lng: -104.82, state: "WY", ppsf: 300 },
   "San Antonio": { lat: 29.42, lng: -98.49, state: "TX", ppsf: 260 },
-  "Fort Worth": { lat: 32.75, lng: -97.33, state: "TX", ppsf: 300 },
+  "Fort Worth": { lat: 32.75, lng: -97.33, state: "TX", ppsf: 210 }, // Redfin median $175/sf
   "El Paso": { lat: 31.76, lng: -106.49, state: "TX", ppsf: 220 },
   Plano: { lat: 33.02, lng: -96.70, state: "TX", ppsf: 350 },
   "Corpus Christi": { lat: 27.80, lng: -97.40, state: "TX", ppsf: 240, coast: "NW" },
@@ -189,7 +189,7 @@ export const METRO_CENTERS: Record<string, MetroCenter> = {
   Buffalo: { lat: 42.89, lng: -78.88, state: "NY", ppsf: 240, coast: "E" },
   Rochester: { lat: 43.16, lng: -77.61, state: "NY", ppsf: 240 },
   Albany: { lat: 42.65, lng: -73.75, state: "NY", ppsf: 280 },
-  Boston: { lat: 42.36, lng: -71.06, state: "MA", ppsf: 750, coast: "W" },
+  Boston: { lat: 42.36, lng: -71.06, state: "MA", ppsf: 870, coast: "W" }, // Redfin median $727/sf
   Worcester: { lat: 42.26, lng: -71.80, state: "MA", ppsf: 380 },
   Providence: { lat: 41.82, lng: -71.41, state: "RI", ppsf: 400, coast: "N" },
   Hartford: { lat: 41.76, lng: -72.69, state: "CT", ppsf: 320 },
@@ -199,7 +199,7 @@ export const METRO_CENTERS: Record<string, MetroCenter> = {
   Philadelphia: { lat: 39.95, lng: -75.17, state: "PA", ppsf: 300, coast: "NW" },
   Pittsburgh: { lat: 40.44, lng: -79.99, state: "PA", ppsf: 240 },
   Baltimore: { lat: 39.29, lng: -76.61, state: "MD", ppsf: 300, coast: "NW" },
-  Washington: { lat: 38.90, lng: -77.04, state: "DC", ppsf: 720, coast: "NE" },
+  Washington: { lat: 38.90, lng: -77.04, state: "DC", ppsf: 620, coast: "NE" }, // Redfin median $515/sf
   Wilmington: { lat: 39.74, lng: -75.55, state: "DE", ppsf: 300 },
   Manchester: { lat: 42.99, lng: -71.45, state: "NH", ppsf: 360 },
   Burlington: { lat: 44.48, lng: -73.21, state: "VT", ppsf: 420 },
