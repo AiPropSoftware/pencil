@@ -891,7 +891,12 @@ function InlineUnderwrite({
             ? `Build $/sf: median of ${lc.samples} real ${city} permits (declared valuations — builders often under-declare; edit to your GC quote).`
             : "Build $/sf: regional baseline — edit to your GC quote.";
         })()}{" "}
-        Sell $/sf: area estimate — replace with your comps.
+        {(() => {
+          const src = ppsfSummary(city).source;
+          return src === "recorded" ? "Sell $/sf: median of real recorded sales — refine with block-level comps."
+            : src === "calibrated" ? "Sell $/sf: anchored to the Redfin city median (May 2026) — replace with your comps."
+            : "Sell $/sf: modeled estimate — replace with your comps.";
+        })()}{" "}
         Financing &amp; closing: leave blank to use modeled costs (financing ≈6% of build; closing inside the 8% soft allowance) — enter your lender quote and title/closing estimate to override.
       </p>
     </div>
@@ -1096,7 +1101,11 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
 
         <FundingSection city={dev.city} state={dev.state} type={dev.productType} buildableSqft={dev.buildingSqft} landCost={Math.round(devOpportunity(dev).maxLandPrice)} />
 
-        <Section title="Area $/sqft trend" tag={ppsf.liveSamples ? `median of ${ppsf.liveSamples.toLocaleString("en-US")} recorded sales` : "modeled from sold comps"}>
+        <Section title="Area $/sqft trend" tag={
+          ppsf.source === "recorded" ? `median of ${(ppsf.liveSamples ?? 0).toLocaleString("en-US")} recorded sales`
+          : ppsf.source === "calibrated" ? "Redfin-anchored · May 2026"
+          : "modeled — verify with comps"
+        }>
           <div className="font-display text-2xl text-gold">${ppsf.current}/sf</div>
           <div className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><TrendingUp className="h-3 w-3" /> ${ppsf.low}–${ppsf.high} range since {ppsf.since}</div>
           <PpsfChart city={dev.city} />

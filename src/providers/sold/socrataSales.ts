@@ -20,6 +20,15 @@ export const SOLD_SOURCES: SoldSource[] = [
     sqftKey: "gross_square_feet",
     limit: 5000,
   },
+  {
+    // Cook County Assessor — Parcel Sales (recorded transfers). Field names
+    // self-verify via the console diagnostic; <20 usable samples = no effect.
+    city: "Chicago",
+    url: "https://datacatalog.cookcountyil.gov/resource/wvhk-k5uv.json",
+    priceKey: "sale_price",
+    sqftKey: "char_bldg_sf",
+    limit: 5000,
+  },
 ];
 
 export interface SoldRateResult {
