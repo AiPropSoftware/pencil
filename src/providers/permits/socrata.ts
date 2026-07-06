@@ -85,11 +85,11 @@ export interface CitySource {
  * falls back to demo data if the dataset id or fields need correcting.
  */
 export const CITY_SOURCES: CitySource[] = [
-  { city: "Austin", state: "TX", url: "https://data.austintexas.gov/resource/3syk-w9eu.json", metroPpsf: 470, lat: 30.27, lng: -97.74, limit: 8000 },
-  { city: "Chicago", state: "IL", url: "https://data.cityofchicago.org/resource/ydr8-5enu.json", metroPpsf: 400, lat: 41.88, lng: -87.63, limit: 6000, where: "permit_type='PERMIT - NEW CONSTRUCTION'" },
-  { city: "Seattle", state: "WA", url: "https://data.seattle.gov/resource/76t5-zqzr.json", metroPpsf: 720, lat: 47.61, lng: -122.33, limit: 6000 },
-  { city: "San Francisco", state: "CA", url: "https://data.sfgov.org/resource/i98e-djp9.json", metroPpsf: 950, lat: 37.77, lng: -122.42, limit: 6000, where: "lower(permit_type_definition) LIKE '%new construction%'" },
-  { city: "New York", state: "NY", url: "https://data.cityofnewyork.us/resource/ipu4-2q9a.json", metroPpsf: 900, lat: 40.71, lng: -74.01, limit: 6000 },
+  { city: "Austin", state: "TX", url: "https://data.austintexas.gov/resource/3syk-w9eu.json", metroPpsf: 390, lat: 30.27, lng: -97.74, limit: 8000 },
+  { city: "Chicago", state: "IL", url: "https://data.cityofchicago.org/resource/ydr8-5enu.json", metroPpsf: 360, lat: 41.88, lng: -87.63, limit: 6000, where: "permit_type='PERMIT - NEW CONSTRUCTION'" },
+  { city: "Seattle", state: "WA", url: "https://data.seattle.gov/resource/76t5-zqzr.json", metroPpsf: 660, lat: 47.61, lng: -122.33, limit: 6000 },
+  { city: "San Francisco", state: "CA", url: "https://data.sfgov.org/resource/i98e-djp9.json", metroPpsf: 1150, lat: 37.77, lng: -122.42, limit: 6000, where: "lower(permit_type_definition) LIKE '%new construction%'" },
+  { city: "New York", state: "NY", url: "https://data.cityofnewyork.us/resource/ipu4-2q9a.json", metroPpsf: 760, lat: 40.71, lng: -74.01, limit: 6000 },
   { city: "Los Angeles", state: "CA", url: "https://data.lacity.org/resource/yv23-pmwf.json", metroPpsf: 720, lat: 34.05, lng: -118.24, limit: 6000 },
   { city: "Fort Worth", state: "TX", url: "https://data.fortworthtexas.gov/resource/quz7-xnsy.json", metroPpsf: 300, lat: 32.75, lng: -97.33, limit: 5000 },
 ];

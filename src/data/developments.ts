@@ -83,7 +83,10 @@ export function safeOffset(m: MetroCenter, latOff: number, lngOff: number): { la
 }
 
 export const METRO_CENTERS: Record<string, MetroCenter> = {
-  Austin: { lat: 30.27, lng: -97.74, state: "TX", ppsf: 470 },
+  // ppsf = typical FINISHED NEW-CONSTRUCTION sale $/sf ≈ Redfin city median
+  // (May 2026) × ~1.2 new-build premium. Verified metros note the real median;
+  // recorded-deed feeds (liveSaleRates) override these wherever cities publish.
+  Austin: { lat: 30.27, lng: -97.74, state: "TX", ppsf: 390 }, // Redfin median $320/sf
   Dallas: { lat: 32.78, lng: -96.80, state: "TX", ppsf: 360 },
   Houston: { lat: 29.76, lng: -95.37, state: "TX", ppsf: 320 },
   Phoenix: { lat: 33.45, lng: -112.07, state: "AZ", ppsf: 360 },
@@ -91,10 +94,10 @@ export const METRO_CENTERS: Record<string, MetroCenter> = {
   Nashville: { lat: 36.16, lng: -86.78, state: "TN", ppsf: 420 },
   Atlanta: { lat: 33.75, lng: -84.39, state: "GA", ppsf: 360 },
   Tampa: { lat: 27.95, lng: -82.46, state: "FL", ppsf: 360, coast: "E" },
-  Miami: { lat: 25.76, lng: -80.19, state: "FL", ppsf: 800, coast: "NW", scatterScale: 0.8 },
+  Miami: { lat: 25.76, lng: -80.19, state: "FL", ppsf: 650, coast: "NW", scatterScale: 0.8 }, // Redfin median $531/sf; luxury segment runs $1,200+ — edit Sell $/sf per deal
   Charlotte: { lat: 35.23, lng: -80.84, state: "NC", ppsf: 360 },
   Raleigh: { lat: 35.78, lng: -78.64, state: "NC", ppsf: 360 },
-  Seattle: { lat: 47.61, lng: -122.33, state: "WA", ppsf: 720, coast: "NS" },
+  Seattle: { lat: 47.61, lng: -122.33, state: "WA", ppsf: 660, coast: "NS" }, // Redfin median $563/sf
   Portland: { lat: 45.51, lng: -122.68, state: "OR", ppsf: 560 },
   Columbus: { lat: 39.96, lng: -82.99, state: "OH", ppsf: 300 },
   "Salt Lake City": { lat: 40.76, lng: -111.89, state: "UT", ppsf: 470, coast: "SE" },
@@ -102,7 +105,7 @@ export const METRO_CENTERS: Record<string, MetroCenter> = {
   "Las Vegas": { lat: 36.17, lng: -115.14, state: "NV", ppsf: 340 },
 
   // ── Nationwide coverage ──────────────────────────────────────────────────
-  "San Francisco": { lat: 37.77, lng: -122.42, state: "CA", ppsf: 950, coast: "S", scatterScale: 0.5 },
+  "San Francisco": { lat: 37.77, lng: -122.42, state: "CA", ppsf: 1150, coast: "S", scatterScale: 0.5 }, // Redfin median $1,140/sf
   "San Jose": { lat: 37.34, lng: -121.89, state: "CA", ppsf: 800 },
   Oakland: { lat: 37.80, lng: -122.27, state: "CA", ppsf: 720, coast: "E" },
   Sacramento: { lat: 38.58, lng: -121.49, state: "CA", ppsf: 480 },
@@ -142,7 +145,7 @@ export const METRO_CENTERS: Record<string, MetroCenter> = {
   "Little Rock": { lat: 34.75, lng: -92.29, state: "AR", ppsf: 220 },
   "New Orleans": { lat: 29.95, lng: -90.07, state: "LA", ppsf: 300, coast: "S", scatterScale: 0.7 },
   "Baton Rouge": { lat: 30.45, lng: -91.19, state: "LA", ppsf: 240 },
-  Chicago: { lat: 41.88, lng: -87.63, state: "IL", ppsf: 400, coast: "W" },
+  Chicago: { lat: 41.88, lng: -87.63, state: "IL", ppsf: 360, coast: "W" }, // Redfin median $303/sf
   Indianapolis: { lat: 39.77, lng: -86.16, state: "IN", ppsf: 240 },
   Detroit: { lat: 42.33, lng: -83.05, state: "MI", ppsf: 260, coast: "NW" },
   "Grand Rapids": { lat: 42.96, lng: -85.67, state: "MI", ppsf: 280 },
@@ -182,7 +185,7 @@ export const METRO_CENTERS: Record<string, MetroCenter> = {
   Durham: { lat: 35.99, lng: -78.90, state: "NC", ppsf: 320 },
   Richmond: { lat: 37.54, lng: -77.44, state: "VA", ppsf: 320 },
   "Virginia Beach": { lat: 36.85, lng: -75.98, state: "VA", ppsf: 320, coast: "W" },
-  "New York": { lat: 40.71, lng: -74.01, state: "NY", ppsf: 900, coast: "N", scatterScale: 0.8 },
+  "New York": { lat: 40.71, lng: -74.01, state: "NY", ppsf: 760, coast: "N", scatterScale: 0.8 }, // Redfin citywide median $652/sf (Manhattan $1,440); live deeds rebase this
   Buffalo: { lat: 42.89, lng: -78.88, state: "NY", ppsf: 240, coast: "E" },
   Rochester: { lat: 43.16, lng: -77.61, state: "NY", ppsf: 240 },
   Albany: { lat: 42.65, lng: -73.75, state: "NY", ppsf: 280 },

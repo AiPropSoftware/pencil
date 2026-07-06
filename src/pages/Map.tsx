@@ -951,8 +951,9 @@ function FundingSection({ city, state, type, buildableSqft, landCost }: {
         Find local lenders in {city} <ExternalLink className="h-3 w-3" />
       </a>
       <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
-        Typical published hard-money ranges: 10–13% interest-only, 1.5–3 points, 12–18-month terms,
-        draws against the build. Not offers — verify current coverage and terms with each lender. Pencil isn’t a broker.
+        Typical published hard-money ranges (2026): 9–15% interest-only with ground-up at the
+        higher end, 1–4 points, 12–18-month terms, draws against the build. Not offers — verify
+        current coverage and terms with each lender. Pencil isn’t a broker.
       </p>
     </Section>
   );
