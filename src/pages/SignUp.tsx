@@ -66,30 +66,15 @@ export default function SignUp() {
     }
   };
 
-  const handleGoogle = async () => {
-    const sb = getSupabase()!;
-    const { error } = await sb.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: `${window.location.origin}/deal-analyzer` },
-    });
-    if (error) toast.error(error.message);
-  };
-
   return (
     <div className="container py-20 max-w-md">
       <Card>
         <CardHeader>
           <div className="gold-rule" />
-          <CardTitle className="mt-3 text-3xl">Start free trial</CardTitle>
-          <CardDescription>14 days of Pencil Pro. No credit card.</CardDescription>
+          <CardTitle className="mt-3 text-3xl">Create your free account</CardTitle>
+          <CardDescription>Full access to the live permit map, underwriting, and funding tools.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Button variant="outline" className="w-full" onClick={handleGoogle}>
-            Continue with Google
-          </Button>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <div className="flex-1 h-px bg-border" /> or email <div className="flex-1 h-px bg-border" />
-          </div>
           <form onSubmit={submit} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="name">Full name</Label>

@@ -1,49 +1,54 @@
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/hooks/useAuth";
 import {
-  Calculator, Map as MapIcon, BarChart3, HardHat,
-  ArrowRight, Check, TrendingUp, FileText, Sparkles,
+  Map as MapIcon, Calculator, Landmark, ScrollText,
+  ArrowRight, Check, Sparkles,
 } from "lucide-react";
 
-const MODULES = [
-  {
-    icon: Calculator,
-    title: "Deal Analyzer",
-    body: "The same underwriting model the $40K Developer Launch program teaches — ported into software. Live results for hard cost, carry, refi cash-back, DSCR, cash-on-cash, cap rate, and partner waterfall.",
-  },
+// Every number on this page is real and verifiable in the product.
+const FEATURES = [
   {
     icon: MapIcon,
-    title: "Geo Developer Map",
-    body: "Drop a pin or draw a polygon. See every active developer in that radius, what they build, how many projects they have under permit, and a clean profile drawer for outreach.",
+    title: "Live permit map",
+    body: "Every pin is a real building permit pulled straight from city public records — exact addresses from each city's own GIS, real Street View photos, self-updating every five minutes. Search any city and Pencil hunts its permit datasets on demand.",
   },
   {
-    icon: BarChart3,
-    title: "Comps Engine",
-    body: "Brand-new construction sold in the last 12 months — $/sqft scatter, percentile bands, days on market, sold-to-list. One click pre-fills your Deal Analyzer with the median.",
+    icon: Calculator,
+    title: "Underwrite in seconds",
+    body: "Tap any property and run the numbers: your land price, your sell $/sf, build costs seeded from real permit valuations. Financing modeled like an actual construction loan — 85% LTC, current hard-money rates, points, and carry.",
   },
   {
-    icon: HardHat,
-    title: "Builder Directory",
-    body: "Verified GCs and trades by metro with past projects, license numbers, and typical price bands. Request-a-quote built in.",
+    icon: Landmark,
+    title: "Fund it",
+    body: "A curated directory of national and regional hard-money lenders — Kiavi, Lima One, RCN, Builders Capital and more — matched to the property's state, with ground-up construction specialists ranked first.",
+  },
+  {
+    icon: ScrollText,
+    title: "One click to city hall",
+    body: "Permit application portals, zoning codes, and parcel GIS maps for 40+ major metros — the official city and county sites, one click from any property.",
   },
 ];
 
 const PROOF = [
-  ["Avg projected profit per deal", "$220K+"],
-  ["Markets covered", "412"],
-  ["Permits indexed monthly", "180K"],
+  ["8", "cities streaming live permits"],
+  ["2,700+", "real permits on the map today"],
+  ["56", "metros with verified market data"],
 ];
 
 const BULLETS = [
-  "Replace turnkey rental returns with developer-margin returns",
-  "Underwrite ground-up before you put a dollar down",
-  "Find off-market infill lots your competition isn't running",
-  "Vet the right builder, not the most expensive Google result",
+  "Every pin is a real permit from public records",
+  "Honest math — your numbers, real loan modeling",
+  "Hard-money lenders matched to your state",
+  "Official permit, zoning & GIS portals built in",
 ];
 
 export default function Landing() {
+  const { user } = useAuth();
+  if (user) return <Navigate to="/map" replace />;
+
   return (
     <div className="animate-fade-in">
       {/* Hero */}
@@ -51,24 +56,24 @@ export default function Landing() {
         <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-12 items-center">
           <div>
             <Badge variant="gold" className="rounded-full">
-              <Sparkles className="mr-1.5 h-3 w-3" /> New: Geo Developer Map
+              <Sparkles className="mr-1.5 h-3 w-3" /> Live public-record data
             </Badge>
             <h1 className="mt-5 font-display text-5xl sm:text-6xl lg:text-[68px] leading-[1.05] tracking-tight">
               Investors become <em className="text-gold not-italic font-display">developers</em>.
             </h1>
             <p className="mt-6 text-lg text-muted-foreground max-w-xl leading-relaxed">
-              Pencil is the software companion to the Developer Launch playbook.
-              Underwrite, locate, and execute ground-up small multifamily and
-              infill development deals — with data instead of guesswork.
+              Pencil puts every new-construction permit in America's biggest
+              cities on one map — real records, real addresses — then lets you
+              underwrite and fund the deal without leaving the page.
             </p>
             <div className="mt-9 flex flex-wrap gap-3">
               <Button size="lg" variant="gold" asChild>
                 <Link to="/sign-up">
-                  Sign up <ArrowRight className="h-4 w-4" />
+                  Sign up free <ArrowRight className="h-4 w-4" />
                 </Link>
               </Button>
               <Button size="lg" variant="outline" asChild>
-                <Link to="/map">Explore the development map</Link>
+                <Link to="/map">Explore the live map</Link>
               </Button>
             </div>
             <ul className="mt-10 grid sm:grid-cols-2 gap-x-6 gap-y-2.5">
@@ -86,10 +91,10 @@ export default function Landing() {
 
       <div className="section-divider" />
 
-      {/* Proof */}
+      {/* Proof — real, current product numbers */}
       <section className="container py-14">
         <div className="grid sm:grid-cols-3 gap-10">
-          {PROOF.map(([label, value]) => (
+          {PROOF.map(([value, label]) => (
             <div key={label} className="text-center sm:text-left">
               <div className="font-display text-4xl text-foreground">{value}</div>
               <div className="mt-2 stat-label">{label}</div>
@@ -100,22 +105,21 @@ export default function Landing() {
 
       <div className="section-divider" />
 
-      {/* Modules */}
-      <section className="container py-24" id="modules">
+      {/* Features */}
+      <section className="container py-24" id="features">
         <div className="max-w-2xl">
           <div className="gold-rule" />
           <h2 className="mt-5 font-display text-4xl sm:text-5xl tracking-tight">
-            Four modules. One conviction.
+            One map. The whole deal.
           </h2>
           <p className="mt-4 text-muted-foreground text-lg">
-            Every ground-up deal lives or dies on the same four questions:
-            does the math work, is anyone else building here, what are
-            finished homes worth, and who will build it. Pencil answers all
-            four in one workspace.
+            Ground-up deals live or die on the same questions: what's being
+            built here, does the math work, and who funds it. Pencil answers
+            all three on a single page.
           </p>
         </div>
         <div className="mt-14 grid md:grid-cols-2 gap-6">
-          {MODULES.map(({ icon: Icon, title, body }) => (
+          {FEATURES.map(({ icon: Icon, title, body }) => (
             <Card key={title} className="border-border/80 hover:shadow-elevated transition-shadow">
               <CardContent className="p-7">
                 <div className="flex items-center gap-3">
@@ -137,9 +141,9 @@ export default function Landing() {
       <section className="container py-24">
         <div className="grid lg:grid-cols-3 gap-12">
           {[
-            { n: "01", t: "Underwrite", b: "Plug land, hard cost, ARV, and rent. Pencil returns a banker-ready pro forma in under 30 seconds." },
-            { n: "02", t: "Locate", b: "Polygon-search any metro. Pencil surfaces active developers, permit activity, and new-construction comps." },
-            { n: "03", t: "Execute", b: "Save the deal, share it with your capital partner, and request quotes from vetted builders." },
+            { n: "01", t: "Scout", b: "Search any city. Real permits appear at their exact addresses with Street View, contractor of record, and issue dates from the public file." },
+            { n: "02", t: "Underwrite", b: "Enter your land price and sell $/sf. Pencil returns selling costs, real construction-loan financing, all-in cost, and profit — instantly." },
+            { n: "03", t: "Fund & execute", b: "See hard-money lenders that cover your state, then jump straight to the city's permit portal, zoning code, and parcel map." },
           ].map((s) => (
             <div key={s.n}>
               <div className="font-display text-gold text-3xl">{s.n}</div>
@@ -150,25 +154,26 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Pricing CTA */}
-      <section className="container py-24" id="pricing">
+      {/* CTA */}
+      <section className="container py-24">
         <Card className="bg-foreground text-background border-foreground overflow-hidden">
           <CardContent className="p-12 lg:p-16 relative">
             <div className="absolute -right-16 -top-16 h-64 w-64 rounded-full bg-gold/20 blur-3xl" />
             <div className="relative max-w-2xl">
-              <Badge variant="gold" className="rounded-full">14-day free trial</Badge>
+              <Badge variant="gold" className="rounded-full">Free to start</Badge>
               <h2 className="mt-5 font-display text-4xl sm:text-5xl text-background tracking-tight">
-                Stop buying turnkey. Start building.
+                Stop guessing. Start building.
               </h2>
               <p className="mt-4 text-background/80 text-lg leading-relaxed">
-                Pencil Pro is $149/month. One avoided bad deal pays for it for the next decade.
+                The permits are public. The math is honest. The lenders are real.
+                All that's missing is you.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Button size="lg" variant="gold" asChild>
-                  <Link to="/sign-up">Sign up <ArrowRight className="h-4 w-4" /></Link>
+                  <Link to="/sign-up">Sign up free <ArrowRight className="h-4 w-4" /></Link>
                 </Button>
                 <Button size="lg" variant="outline" className="bg-transparent border-background/30 text-background hover:bg-background/10 hover:text-background" asChild>
-                  <Link to="/map">Explore the development map</Link>
+                  <Link to="/map">Explore the live map</Link>
                 </Button>
               </div>
             </div>
@@ -187,43 +192,42 @@ function HeroVisual() {
         <CardContent className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <div className="stat-label">Sample deal · Austin, TX</div>
-              <div className="mt-1 font-display text-lg">2421 E 5th St · Fourplex</div>
+              <div className="stat-label">Sample underwrite · Austin, TX</div>
+              <div className="mt-1 font-display text-lg">E 5th St · Fourplex</div>
             </div>
-            <Badge variant="gold">Cash-on-cash 18.4%</Badge>
+            <Badge variant="gold">Sample</Badge>
           </div>
           <div className="mt-5 grid grid-cols-3 gap-4">
             {[
               ["All-in cost", "$1.07M"],
-              ["ARV", "$1.34M"],
-              ["Profit", "$268K"],
+              ["Sells for", "$1.34M"],
+              ["Profit", "$186K"],
             ].map(([l, v]) => (
               <div key={l} className="rounded-md border border-border bg-secondary/40 p-3">
                 <div className="stat-label">{l}</div>
-                <div className="mt-1 font-display text-xl">{v}</div>
+                <div className={`mt-1 font-display text-xl ${l === "Profit" ? "text-emerald-600" : ""}`}>{v}</div>
               </div>
             ))}
           </div>
           <div className="mt-5 rounded-md border border-border bg-background p-4">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Refi cash-back</span>
-              <span className="text-gold font-medium flex items-center gap-1">
-                <TrendingUp className="h-3 w-3" /> 100% of initial cash
-              </span>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Construction financing</span>
+              <span className="text-foreground font-medium">85% LTC · 11.5% · 2 pts</span>
             </div>
-            <div className="mt-3 h-2 rounded-full bg-secondary overflow-hidden">
-              <div className="h-full w-full bg-gradient-to-r from-gold to-gold/60" />
-            </div>
-            <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] text-muted-foreground">
-              <span>Hard cost</span><span className="text-center">Carry</span><span className="text-right">Refi</span>
+            <div className="mt-2 flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Selling costs</span>
+              <span className="text-foreground font-medium">6.7% realtor + closing</span>
             </div>
           </div>
           <div className="mt-5 flex items-center justify-between rounded-md border border-border bg-background p-3">
             <div className="flex items-center gap-2.5 text-sm">
-              <FileText className="h-4 w-4 text-muted-foreground" />
-              <span className="text-foreground">Banker-ready PDF</span>
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-gold opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-gold" />
+              </span>
+              <span className="text-foreground">Live · 8 cities streaming public records</span>
             </div>
-            <span className="text-xs text-muted-foreground">1-click export</span>
+            <span className="text-xs text-muted-foreground">self-updating</span>
           </div>
         </CardContent>
       </Card>

@@ -28,15 +28,6 @@ export default function SignIn() {
     navigate(from, { replace: true });
   };
 
-  const handleGoogle = async () => {
-    const sb = getSupabase()!;
-    const { error } = await sb.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: `${window.location.origin}${from}` },
-    });
-    if (error) toast.error(error.message);
-  };
-
   return (
     <div className="container py-20 max-w-md">
       <Card>
@@ -46,12 +37,6 @@ export default function SignIn() {
           <CardDescription>Sign in to continue underwriting.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Button variant="outline" className="w-full" onClick={handleGoogle}>
-            Continue with Google
-          </Button>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <div className="flex-1 h-px bg-border" /> or email <div className="flex-1 h-px bg-border" />
-          </div>
           <form onSubmit={handleEmail} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
@@ -67,7 +52,7 @@ export default function SignIn() {
           </form>
           <p className="text-sm text-muted-foreground text-center">
             Don't have an account?{" "}
-            <Link to="/sign-up" className="text-gold hover:underline">Start free trial</Link>
+            <Link to="/sign-up" className="text-gold hover:underline">Sign up free</Link>
           </p>
         </CardContent>
       </Card>

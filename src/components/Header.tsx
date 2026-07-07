@@ -26,20 +26,30 @@ export function Header() {
         <Logo />
         <div className="flex items-center gap-3">
           {user ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={async () => {
-                await signOut();
-                navigate("/");
-              }}
-            >
-              Sign out
-            </Button>
+            <>
+              <Button size="sm" variant="gold" asChild>
+                <Link to="/map">Open the map</Link>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={async () => {
+                  await signOut();
+                  navigate("/");
+                }}
+              >
+                Sign out
+              </Button>
+            </>
           ) : (
-            <Button size="sm" variant="gold" asChild>
-              <Link to="/sign-up">Sign up</Link>
-            </Button>
+            <>
+              <Button size="sm" variant="ghost" asChild>
+                <Link to="/sign-in">Sign in</Link>
+              </Button>
+              <Button size="sm" variant="gold" asChild>
+                <Link to="/sign-up">Sign up</Link>
+              </Button>
+            </>
           )}
         </div>
       </div>

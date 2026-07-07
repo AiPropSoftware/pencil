@@ -6,9 +6,12 @@ import { Footer } from "@/components/Footer";
 import { Toaster } from "@/components/ui/toaster";
 import { RequireAuth } from "@/components/RequireAuth";
 import MapPage from "@/pages/Map";
+import Landing from "@/pages/Landing";
 
 // The map IS the app — every other page lazy-loads off the critical path.
 const DealAnalyzer = React.lazy(() => import("@/pages/DealAnalyzer"));
+const Terms = React.lazy(() => import("@/pages/Terms"));
+const Privacy = React.lazy(() => import("@/pages/Privacy"));
 const SignIn = React.lazy(() => import("@/pages/SignIn"));
 const SignUp = React.lazy(() => import("@/pages/SignUp"));
 const Admin = React.lazy(() => import("@/pages/Admin"));
@@ -27,8 +30,9 @@ export default function App() {
         <CrashBoundary>
         <React.Suspense fallback={<PageFallback />}>
         <Routes>
+          {/* Front door for visitors; signed-in users go straight to the map. */}
+          <Route path="/" element={<Landing />} />
           {/* Single surface: the map IS the app. */}
-          <Route path="/" element={<MapPage />} />
           <Route path="/map" element={<MapPage />} />
 
           {/* Drill-downs (reached from the map, not from any menu). */}
@@ -36,6 +40,8 @@ export default function App() {
           <Route path="/sign-in" element={<SignIn />} />
           <Route path="/sign-up" element={<SignUp />} />
           <Route path="/billing/success" element={<BillingSuccess />} />
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/privacy" element={<Privacy />} />
           <Route
             path="/admin"
             element={
