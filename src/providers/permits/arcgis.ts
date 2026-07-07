@@ -325,6 +325,7 @@ function normalize(src: ArcgisCitySource, data: ArcgisResponse): { items: Develo
       estValue,
       pricePerSqft,
       description: `${type} new-construction permit — real public record${valuation > 0 ? ` · declared valuation $${valuation.toLocaleString("en-US")}` : ""}.`,
+      sqftEstimated: sqftRaw == null,
     });
   }
 

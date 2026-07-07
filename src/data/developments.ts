@@ -35,6 +35,8 @@ export interface Development {
   estValue: number; // projected completed value (ARV)
   pricePerSqft: number; // build cost $/sqft assumption
   description: string;
+  /** True when the permit didn't declare square footage and sizes are derived. */
+  sqftEstimated?: boolean;
 }
 
 export const PRODUCT_TYPES: ProductType[] = [

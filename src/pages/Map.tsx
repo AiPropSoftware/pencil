@@ -570,7 +570,9 @@ function DevCard({ d, selected, watched, onWatch, onClick }: { d: Development; s
           </div>
           <div className="text-xs text-muted-foreground">{d.city}, {d.state} · {d.units}u · {d.status}</div>
           <div className="mt-1 text-xs text-muted-foreground">
-            {fmtNumber(d.buildingSqft)} sf building · {fmtNumber(d.landSqft)} sf lot
+            {d.sqftEstimated
+              ? `~${fmtNumber(d.buildingSqft)} sf (est. — not on permit)`
+              : `${fmtNumber(d.buildingSqft)} sf building · ${fmtNumber(d.landSqft)} sf lot`}
           </div>
         </div>
       </div>
@@ -890,8 +892,8 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
         <div className="mt-6 grid grid-cols-2 gap-3">
           <Metric icon={Building2} label="Units" value={fmtNumber(dev.units)} />
           <Metric icon={Layers3} label="Stories" value={fmtNumber(dev.stories)} />
-          <Metric icon={Ruler} label="Land" value={`${fmtNumber(dev.landSqft)} sf`} />
-          <Metric icon={Ruler} label="Building" value={`${fmtNumber(dev.buildingSqft)} sf`} />
+          <Metric icon={Ruler} label={dev.sqftEstimated ? "Land (est.)" : "Land"} value={`${dev.sqftEstimated ? "~" : ""}${fmtNumber(dev.landSqft)} sf`} />
+          <Metric icon={Ruler} label={dev.sqftEstimated ? "Building (est.)" : "Building"} value={`${dev.sqftEstimated ? "~" : ""}${fmtNumber(dev.buildingSqft)} sf`} />
         </div>
 
         <InlineUnderwrite city={dev.city} type={dev.productType} buildableSqft={dev.buildingSqft} address={`${dev.name}, ${dev.city}, ${dev.state}`} />
@@ -975,7 +977,7 @@ function ListingPanel({ listing: l, watched, onWatch, onClose }: { listing: List
         <FundingSection city={l.city} state={l.state} />
 
         <p className="mt-4 text-[11px] text-muted-foreground/80">
-          Buildable ≈ {fmtNumber(l.buildableSqft)} sf {l.productTypeIfBuilt}. Demo listing — swaps for live MLS/ATTOM data.
+          Redevelopment potential ≈ {fmtNumber(l.buildableSqft)} sf {l.productTypeIfBuilt} (zoning-dependent — verify with the city).
         </p>
       </div>
     </Drawer>

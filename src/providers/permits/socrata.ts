@@ -233,6 +233,7 @@ export async function fetchCityDevelopments(src: CitySource, limitOverride?: num
       estValue,
       pricePerSqft,
       description: `${type} new-construction permit — real public record${valuation > 0 ? ` · declared valuation $${valuation.toLocaleString("en-US")}` : ""}.`,
+      sqftEstimated: !hasRealSqft,
     });
   }
 
