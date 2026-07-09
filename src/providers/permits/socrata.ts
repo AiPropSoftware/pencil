@@ -92,6 +92,8 @@ export const CITY_SOURCES: CitySource[] = [
   { city: "New York", state: "NY", url: "https://data.cityofnewyork.us/resource/ipu4-2q9a.json", metroPpsf: 760, lat: 40.71, lng: -74.01, limit: 6000 },
   { city: "Los Angeles", state: "CA", url: "https://data.lacity.org/resource/yv23-pmwf.json", metroPpsf: 780, lat: 34.05, lng: -118.24, limit: 6000 },
   { city: "Fort Worth", state: "TX", url: "https://data.fortworthtexas.gov/resource/quz7-xnsy.json", metroPpsf: 210, lat: 32.75, lng: -97.33, limit: 5000 },
+  // Dallas OpenData "Building Permits" (official, Socrata): dallasopendata.com/Services/Building-Permits/e7gq-4sah
+  { city: "Dallas", state: "TX", url: "https://www.dallasopendata.com/resource/e7gq-4sah.json", metroPpsf: 310, lat: 32.78, lng: -96.80, limit: 6000 },
 ];
 
 export const AUSTIN = CITY_SOURCES[0];
