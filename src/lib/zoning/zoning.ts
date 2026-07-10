@@ -122,6 +122,98 @@ export const CITY_ZONING: Record<string, CityZoning> = {
     noZoning:
       "Houston has NO zoning code — use is governed by private deed restrictions plus Chapter 42 development rules (typical minimum lot: 3,500 sf inside Loop 610 / 5,000 sf outside; setbacks depend on street class). Check the deed restrictions for the specific lot.",
   },
+  "Miami Beach": {
+    state: "FL",
+    codeUrl: "https://library.municode.com/fl/miami_beach/codes/resiliency_code_(current_land_development_regulations)",
+    codeName: "Miami Beach Resiliency Code Ch. 7 (eff. June 2023; formerly Ch. 142)",
+    zones: (() => {
+      // RS-1..RS-4 differ mainly by minimum lot size (which the city publishes
+      // in the § 7.2.2 tables); the intensity standards below are shared.
+      const rs = (code: string, name: string): ZoneRules => ({
+        code, name,
+        uses: "Single-family detached only (accessory ADU/guesthouse allowed; no standalone rental)",
+        maxUnits: 1, far: 0.5, coverage: 0.3, stories: 2,
+        setbacks: { front: "20 ft (2nd floor +10 ft more)", side: "greater of 5 ft or 10% of lot width", rear: "per § 7.2.2 — verify with the city" },
+        source: "Resiliency Code § 7.2.2 (former § 142-105/-106)",
+        notes: "0.5 isn't FAR — it's the max home size: 50% of lot area, up to 60% via administrative review. Coverage 30% for two-story homes; height is 2 stories above base flood elevation.",
+      });
+      return [
+        rs("RS-1", "Single-Family Residential (largest lots)"),
+        rs("RS-2", "Single-Family Residential"),
+        rs("RS-3", "Single-Family Residential"),
+        rs("RS-4", "Single-Family Residential (smallest lots)"),
+        {
+          code: "RM-1", name: "Residential Multifamily, Low Intensity",
+          uses: "Multifamily, townhomes, single-family", far: 1.25, heightFt: 50,
+          setbacks: { front: "per § 7.2.4 tables", side: "per § 7.2.4 tables", rear: "per § 7.2.4 tables" },
+          source: "Resiliency Code § 7.2.4 (former § 142-155)",
+          notes: "FAR 1.4 on the west side of Collins Ave (76th–79th St). Density is controlled by FAR + citywide minimum unit sizes (550 sf new construction), not units/acre. Height has area-specific exceptions.",
+        },
+        {
+          code: "RM-2", name: "Residential Multifamily, Medium Intensity",
+          uses: "Multifamily, apartment-hotels, hotels, townhomes", far: 2.0,
+          setbacks: { front: "per § 7.2.5 tables", side: "per § 7.2.5 tables", rear: "per § 7.2.5 tables" },
+          source: "Resiliency Code § 7.2.5 (former §§ 142-212–218)",
+          notes: "Height varies by sub-area (oceanfront vs. interior) — check the § 7.2.5 location tables.",
+        },
+      ];
+    })(),
+  },
+  Miami: {
+    state: "FL",
+    codeUrl: "https://www.miami.gov/Planning-Zoning-Land-Use/View-City-of-Miami-Zoning-Code-Miami-21",
+    codeName: "Miami 21 form-based code (Art. 4 Table 2 + Art. 5)",
+    zones: [
+      {
+        code: "T3-R", name: "Sub-Urban, Restricted",
+        uses: "Single-family only",
+        maxUnits: 1, minLotPerUnitSqft: 4840, coverage: 0.5, stories: 2,
+        setbacks: { front: "20 ft", side: "5 ft", rear: "15–20 ft (published values conflict — see Art. 5 Illus. 5.3)" },
+        source: "Miami 21 Art. 4 Table 2; Art. 5 § 5.3",
+        notes: "Min lot 5,000 sf / 50 ft wide; density 9 du/ac; second-story coverage additionally capped at 30%.",
+      },
+      {
+        code: "T3-L", name: "Sub-Urban, Limited",
+        uses: "Single-family + one ancillary unit (ADU)",
+        maxUnits: 2, coverage: 0.5, stories: 2,
+        setbacks: { front: "20 ft", side: "5 ft", rear: "15–20 ft (published values conflict — see Art. 5 Illus. 5.3)" },
+        source: "Miami 21 Art. 4 Table 2; Art. 5 § 5.3",
+        notes: "Min lot 5,000 sf / 50 ft wide; 9 du/ac density; second-story coverage capped at 30%.",
+      },
+      {
+        code: "T3-O", name: "Sub-Urban, Open",
+        uses: "Single-family or duplex (two units at the frontage)",
+        maxUnits: 2, minLotPerUnitSqft: 2420, coverage: 0.5, stories: 2,
+        setbacks: { front: "20 ft", side: "5 ft", rear: "15–20 ft (published values conflict — see Art. 5 Illus. 5.3)" },
+        source: "Miami 21 Art. 4 Table 2; Art. 5 § 5.3",
+        notes: "Min lot 5,000 sf / 50 ft wide; density 18 du/ac.",
+      },
+      {
+        code: "T4-R", name: "General Urban, Restricted",
+        uses: "Rowhouses, townhomes, small apartment buildings",
+        minLotPerUnitSqft: 1210, coverage: 0.6, stories: 3,
+        setbacks: { front: "10 ft", side: "0–5 ft (context-dependent)", rear: "per Art. 5 Illus. 5.4" },
+        source: "Miami 21 Art. 4 Table 2; Art. 5 § 5.4",
+        notes: "Density 36 du/ac. No FAR in T4 — form-controlled.",
+      },
+      {
+        code: "T5-R", name: "Urban Center, Restricted",
+        uses: "Multifamily (residential only)",
+        minLotPerUnitSqft: 670, coverage: 0.8, stories: 5,
+        setbacks: { front: "10 ft", side: "0 ft (graduated abutting T3)", rear: "0 ft (graduated abutting T3)" },
+        source: "Miami 21 Art. 4 Table 2; Art. 5 § 5.5",
+        notes: "Density 65 du/ac. Graduated setbacks apply where the lot abuts T3.",
+      },
+      {
+        code: "T6-8-R", name: "Urban Core, Restricted (8-story tier)",
+        uses: "High-density multifamily",
+        minLotPerUnitSqft: 290, far: 5.0, coverage: 0.8, stories: 8,
+        setbacks: { front: "10 ft", side: "0 ft (tower setbacks above 8th story)", rear: "0 ft (tower setbacks above 8th story)" },
+        source: "Miami 21 Art. 4 Table 2; Art. 5 § 5.6; Art. 3 § 3.14",
+        notes: "Density 150 du/ac. 5.0 is FLR (Miami 21's FAR); +25% via the Public Benefits Program, bonus to 12 stories — bonus unavailable abutting T3.",
+      },
+    ],
+  },
   Seattle: {
     state: "WA",
     codeUrl: "https://www.seattle.gov/sdci/codes/codes-we-enforce-(a-z)/neighborhood-residential-code",
