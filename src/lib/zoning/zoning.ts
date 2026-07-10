@@ -29,6 +29,9 @@ export interface ZoneRules {
   stories?: number;
   heightFt?: number;
   setbacks?: { front: string; side: string; rear: string };
+  /** Numeric setbacks (ft) — only where the code's values are plain numbers;
+   * powers the buildable-footprint bound when lot width/depth are known. */
+  setbackFt?: { front: number; side: number; rear: number };
   /** Where these numbers come from — shown in the UI. */
   source: string;
   notes?: string;
@@ -64,6 +67,7 @@ export const CITY_ZONING: Record<string, CityZoning> = {
         code: "SF-1", name: "Single-Family (Large Lot)", uses: "Single-family; up to 3 units under HOME",
         maxUnits: 3, minLotPerUnitSqft: 1800, coverage: 0.4, stories: 2, heightFt: 35,
         setbacks: { front: "25 ft", side: "5 ft", rear: "10 ft" },
+        setbackFt: { front: 25, side: 5, rear: 10 },
         source: "LDC § 25-2-492; HOME Phase 1–2",
         notes: "HOME Phase 2 (2024) allows lots as small as ~1,800 sf per unit — verify current status with the city.",
       },
@@ -71,24 +75,28 @@ export const CITY_ZONING: Record<string, CityZoning> = {
         code: "SF-2", name: "Single-Family (Standard Lot)", uses: "Single-family; up to 3 units under HOME",
         maxUnits: 3, minLotPerUnitSqft: 1800, coverage: 0.4, stories: 2, heightFt: 35,
         setbacks: { front: "25 ft", side: "5 ft", rear: "10 ft" },
+        setbackFt: { front: 25, side: 5, rear: 10 },
         source: "LDC § 25-2-492; HOME Phase 1–2",
       },
       {
         code: "SF-3", name: "Family Residence", uses: "Single-family, duplex; up to 3 units under HOME",
         maxUnits: 3, minLotPerUnitSqft: 1800, coverage: 0.45, stories: 2, heightFt: 35,
         setbacks: { front: "25 ft", side: "5 ft", rear: "10 ft" },
+        setbackFt: { front: 25, side: 5, rear: 10 },
         source: "LDC § 25-2-492; HOME Phase 1–2",
       },
       {
         code: "SF-6", name: "Townhouse & Condominium", uses: "Townhomes, condos, small multifamily",
         minLotPerUnitSqft: 1600, coverage: 0.4, stories: 3, heightFt: 35,
         setbacks: { front: "25 ft", side: "5 ft", rear: "10 ft" },
+        setbackFt: { front: 25, side: 5, rear: 10 },
         source: "LDC § 25-2-492",
       },
       {
         code: "MF-3", name: "Multifamily (Medium Density)", uses: "Apartments / condos",
         minLotPerUnitSqft: 1000, coverage: 0.55, stories: 3, heightFt: 40,
         setbacks: { front: "25 ft", side: "5 ft", rear: "10 ft" },
+        setbackFt: { front: 25, side: 5, rear: 10 },
         source: "LDC § 25-2-492",
       },
     ],
@@ -213,6 +221,9 @@ export interface ParcelInfo {
   zone?: string;
   /** Max residential FAR recorded on the parcel (NYC PLUTO ResidFAR). */
   residFar?: number;
+  /** Recorded lot frontage / depth in feet (NYC PLUTO LotFront/LotDepth). */
+  lotFront?: number;
+  lotDepth?: number;
   /** Where the numbers come from — shown in the UI. */
   source: string;
 }
@@ -223,7 +234,7 @@ interface ParcelSource {
   url: string;
   source: string;
   /** Known-schema field names; omitted → strict schema-agnostic probing. */
-  fields?: { lot: string; zone?: string; residFar?: string; address: string };
+  fields?: { lot: string; zone?: string; residFar?: string; front?: string; depth?: string; address: string };
 }
 
 const PARCEL_SOURCES: ParcelSource[] = [
@@ -233,7 +244,7 @@ const PARCEL_SOURCES: ParcelSource[] = [
     match: (c, s) => s === "NY" && /^(new york|manhattan|brooklyn|the bronx|bronx|queens|staten island)$/i.test(c),
     url: "https://data.cityofnewyork.us/resource/64uk-42ks.json",
     source: "NYC PLUTO (Dept. of City Planning)",
-    fields: { lot: "lotarea", zone: "zonedist1", residFar: "residfar", address: "address" },
+    fields: { lot: "lotarea", zone: "zonedist1", residFar: "residfar", front: "lotfront", depth: "lotdepth", address: "address" },
   },
   {
     // Cook County Assessor parcel universe — schema probed, never guessed.
@@ -251,6 +262,10 @@ const num = (x: unknown): number | undefined => {
 /** Sane recorded-lot-area range: rejects flags, codes, and valuation fields. */
 const saneLot = (n: number | undefined): number | undefined =>
   n != null && n >= 200 && n <= 2_000_000 ? Math.round(n) : undefined;
+
+/** Sane lot frontage/depth in feet. */
+const saneDim = (n: number | undefined): number | undefined =>
+  n != null && n >= 10 && n <= 2_000 ? Math.round(n) : undefined;
 
 /**
  * Look the address up in the city/county's own parcel table: recorded lot
@@ -279,6 +294,8 @@ export async function parcelAtAddress(city: string, state: string, streetAddress
     let lotSqft: number | undefined;
     let zone: string | undefined;
     let residFar: number | undefined;
+    let lotFront: number | undefined;
+    let lotDepth: number | undefined;
     if (src.fields) {
       lotSqft = saneLot(num(pick[src.fields.lot]));
       if (src.fields.zone) {
@@ -286,6 +303,8 @@ export async function parcelAtAddress(city: string, state: string, streetAddress
         if (typeof z === "string" && z.trim()) zone = z.trim();
       }
       if (src.fields.residFar) residFar = num(pick[src.fields.residFar]);
+      if (src.fields.front) lotFront = saneDim(num(pick[src.fields.front]));
+      if (src.fields.depth) lotDepth = saneDim(num(pick[src.fields.depth]));
     } else {
       for (const [k, v] of Object.entries(pick)) {
         if (/(^|_)(land|lot)_?(sq_?ft|sf|size|area)/i.test(k) && !/val|price|tax|assess|code|flag/i.test(k)) {
@@ -296,7 +315,7 @@ export async function parcelAtAddress(city: string, state: string, streetAddress
       zone = pickZoneValue(pick) ?? undefined;
     }
     if (lotSqft == null && !zone && residFar == null) return null;
-    return { lotSqft, zone, residFar, source: src.source };
+    return { lotSqft, zone, residFar, lotFront, lotDepth, source: src.source };
   } catch {
     return null;
   }
@@ -306,17 +325,38 @@ export interface Envelope {
   units: number | null;
   buildableSqft: number | null;
   binding: string;
+  /** Ground-floor footprint after setbacks (sf) — when width/depth are known. */
+  footprintSqft: number | null;
 }
 
 /** What the numbers allow on a given lot — every assumption named. */
-export function envelope(lotSqft: number, r: {
-  far?: number; coverage?: number; stories?: number; maxUnits?: number; minLotPerUnitSqft?: number;
-}): Envelope {
-  if (!lotSqft || lotSqft <= 0) return { units: null, buildableSqft: null, binding: "" };
+export function envelope(
+  lotSqft: number,
+  r: {
+    far?: number; coverage?: number; stories?: number; maxUnits?: number; minLotPerUnitSqft?: number;
+    setbackFt?: { front: number; side: number; rear: number };
+  },
+  dims?: { widthFt?: number; depthFt?: number },
+): Envelope {
+  if (!lotSqft || lotSqft <= 0) return { units: null, buildableSqft: null, binding: "", footprintSqft: null };
   const byFar = r.far ? r.far * lotSqft : Infinity;
   const byCoverage = r.coverage && r.stories ? r.coverage * lotSqft * r.stories : Infinity;
-  const buildable = Math.min(byFar, byCoverage);
-  const binding = buildable === Infinity ? "" : byFar <= byCoverage ? "FAR" : "coverage × stories";
+  // Setback footprint: what's left of the lot rectangle after the required
+  // front/side/rear yards, times the allowed stories.
+  let footprint: number | null = null;
+  let byFootprint = Infinity;
+  if (r.setbackFt && dims?.widthFt && dims?.depthFt && dims.widthFt > 0 && dims.depthFt > 0) {
+    const w = Math.max(0, dims.widthFt - 2 * r.setbackFt.side);
+    const d = Math.max(0, dims.depthFt - r.setbackFt.front - r.setbackFt.rear);
+    footprint = Math.round(w * d);
+    if (r.stories) byFootprint = footprint * r.stories;
+  }
+  const buildable = Math.min(byFar, byCoverage, byFootprint);
+  const binding =
+    buildable === Infinity ? ""
+    : buildable === byFootprint ? "setback footprint × stories"
+    : byFar <= byCoverage ? "FAR"
+    : "coverage × stories";
   let units: number | null = null;
   if (r.minLotPerUnitSqft) units = Math.max(1, Math.floor(lotSqft / r.minLotPerUnitSqft));
   if (r.maxUnits != null) units = units == null ? r.maxUnits : Math.min(units, r.maxUnits);
@@ -324,5 +364,6 @@ export function envelope(lotSqft: number, r: {
     units,
     buildableSqft: buildable === Infinity ? null : Math.round(buildable),
     binding,
+    footprintSqft: footprint,
   };
 }

@@ -656,6 +656,12 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
   const [mCov, setMCov] = React.useState(0);
   const [mStories, setMStories] = React.useState(0);
   const [mLotPerUnit, setMLotPerUnit] = React.useState(0);
+  const [mFront, setMFront] = React.useState(0);
+  const [mSide, setMSide] = React.useState(0);
+  const [mRear, setMRear] = React.useState(0);
+  // Lot rectangle (ft) — unlocks the setback-footprint bound.
+  const [lotW, setLotW] = React.useState(0);
+  const [lotD, setLotD] = React.useState(0);
   // Address typeahead.
   const [sugs, setSugs] = React.useState<AddressSuggestion[]>([]);
   const [sugOpen, setSugOpen] = React.useState(false);
@@ -696,6 +702,8 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
     // Recorded lot area fills the lot field unless the user typed their own.
     if (parcel?.lotSqft && (lotSqft === 0 || lotAutoRef.current)) {
       setLotSqft(parcel.lotSqft);
+      if (parcel.lotFront) setLotW(parcel.lotFront);
+      if (parcel.lotDepth) setLotD(parcel.lotDepth);
       lotAutoRef.current = true;
     }
     // Recorded max residential FAR seeds manual mode (user can still edit).
@@ -706,14 +714,16 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
 
   const activeRules: ZoneRules | null =
     res?.rules ?? (res?.cityInfo?.zones?.find((z) => z.code === pickedZone) ?? null);
+  const dims = { widthFt: lotW > 0 ? lotW : undefined, depthFt: lotD > 0 ? lotD : undefined };
   const env = activeRules
-    ? envelope(lotSqft, activeRules)
+    ? envelope(lotSqft, activeRules, dims)
     : envelope(lotSqft, {
         far: mFar > 0 ? mFar : undefined,
         coverage: mCov > 0 ? mCov / 100 : undefined,
         stories: mStories > 0 ? mStories : undefined,
         minLotPerUnitSqft: mLotPerUnit > 0 ? mLotPerUnit : undefined,
-      });
+        setbackFt: { front: mFront, side: mSide, rear: mRear },
+      }, dims);
   const gov = res ? govLinksFor(res.city, res.state) : null;
 
   return (
@@ -758,9 +768,13 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
               {busy ? "Checking…" : "Check zoning"}
             </Button>
           </div>
+          <div className="grid grid-cols-2 gap-2">
+            <NumericField label="Lot width (ft) — optional" value={lotW} onChange={setLotW} />
+            <NumericField label="Lot depth (ft) — optional" value={lotD} onChange={setLotD} />
+          </div>
           {res?.parcel?.lotSqft != null && lotAutoRef.current && (
             <p className="text-[11px] text-muted-foreground">
-              Lot size auto-filled from {res.parcel.source} — edit it if it looks wrong.
+              Lot details auto-filled from {res.parcel.source} — edit them if they look wrong.
             </p>
           )}
         </div>
@@ -836,6 +850,9 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
                       <NumericField label="Coverage %" value={mCov} onChange={setMCov} />
                       <NumericField label="Max stories" value={mStories} onChange={setMStories} />
                       <NumericField label="Lot sf per unit" value={mLotPerUnit} onChange={setMLotPerUnit} />
+                      <NumericField label="Front setback (ft)" value={mFront} onChange={setMFront} />
+                      <NumericField label="Side setback (ft)" value={mSide} onChange={setMSide} />
+                      <NumericField label="Rear setback (ft)" value={mRear} onChange={setMRear} />
                     </div>
                     {res.parcel?.residFar != null && (
                       <p className="mt-2 text-[11px] text-muted-foreground">
@@ -851,9 +868,15 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
                   {lotSqft > 0 && (
                     <div className="mt-2 space-y-1">
                       {env.units != null && <Row label="Units allowed" value={`up to ${env.units}`} />}
+                      {env.footprintSqft != null && <Row label="Footprint after setbacks" value={`~${fmtNumber(env.footprintSqft)} sf`} />}
                       {env.buildableSqft != null
                         ? <Row label={`Max buildable (${env.binding})`} value={`~${fmtNumber(env.buildableSqft)} sf`} />
                         : <p className="text-sm text-muted-foreground">Add FAR or coverage + stories to compute buildable area.</p>}
+                      {env.footprintSqft == null && activeRules?.setbackFt && (
+                        <p className="text-[11px] text-muted-foreground">
+                          Add lot width + depth above to bound the build by this district's setbacks.
+                        </p>
+                      )}
                     </div>
                   )}
                   {env.buildableSqft != null && lotSqft > 0 && (
