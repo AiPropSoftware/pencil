@@ -122,6 +122,80 @@ export const CITY_ZONING: Record<string, CityZoning> = {
     noZoning:
       "Houston has NO zoning code — use is governed by private deed restrictions plus Chapter 42 development rules (typical minimum lot: 3,500 sf inside Loop 610 / 5,000 sf outside; setbacks depend on street class). Check the deed restrictions for the specific lot.",
   },
+  Seattle: {
+    state: "WA",
+    codeUrl: "https://www.seattle.gov/sdci/codes/codes-we-enforce-(a-z)/neighborhood-residential-code",
+    codeName: "SMC Title 23 — NR zone standards per Ordinance 127376 (effective Jan 21, 2026)",
+    zones: (() => {
+      // Ordinance 127376 (Dec 2025, eff. Jan 21, 2026) repealed NR1/NR2/NR3 and
+      // replaced them with a single NR zone. Parcels and GIS records still carry
+      // the old labels, but the NEW standards govern them — so all four codes
+      // point at the current rules.
+      const nr = (code: string, name: string): ZoneRules => ({
+        code, name,
+        uses: "House, duplex–sixplex, townhomes, stacked flats, cottages, ADUs (HB 1110 middle housing)",
+        maxUnits: 6, minLotPerUnitSqft: 1250, far: 1.6, coverage: 0.5, stories: 3, heightFt: 32,
+        setbacks: { front: "15 ft (10 ft for 3+ units)", side: "5 ft avg / 3 ft min", rear: "15 ft (10 ft for 3+ units; 0 at alley)" },
+        setbackFt: { front: 15, side: 5, rear: 15 },
+        source: "SMC ch. 23.44 as replaced by Ord. 127376 (One Seattle Plan)",
+        notes: "4 units/lot by right; 6 within ¼ mi of major transit or with 2 affordable units. FAR is tiered 0.6–1.6 by density (1.6 at ≥1 unit/1,600 sf; stacked-flat/green bonuses to ~2.0); footprint uses the conservative 1–2-unit setbacks.",
+      });
+      return [
+        nr("NR", "Neighborhood Residential (2026 consolidated zone)"),
+        nr("NR1", "Neighborhood Residential 1 (label retired — NR standards govern)"),
+        nr("NR2", "Neighborhood Residential 2 (label retired — NR standards govern)"),
+        nr("NR3", "Neighborhood Residential 3 (label retired — NR standards govern)"),
+      ];
+    })(),
+  },
+  Denver: {
+    state: "CO",
+    codeUrl: "https://www.denvergov.org/Government/Agencies-Departments-Offices/Agencies-Departments-Offices-Directory/Community-Planning-and-Development/Denver-Zoning-Code",
+    codeName: "Denver Zoning Code (form-based, Articles 3–6)",
+    zones: [
+      {
+        code: "U-SU-C", name: "Urban Single Unit C",
+        uses: "1 house + 1 ADU (ADUs citywide since Dec 2024)",
+        maxUnits: 2, coverage: 0.375, stories: 2.5, heightFt: 30,
+        setbacks: { front: "block-sensitive, else 20 ft", side: "5 ft", rear: "12 ft (alley) / 20 ft" },
+        setbackFt: { front: 20, side: 5, rear: 20 },
+        source: "DZC Art. 5, Div. 5.3 form tables (read from the published code)",
+        notes: "Min zone lot 5,500 sf / 50 ft wide. Height 2.5 stories; 30 ft in the front 65% of the lot, 17 ft in the rear 35%. Footprint uses the no-alley 20 ft rear — most Denver lots with alleys get 12 ft.",
+      },
+      {
+        code: "U-TU-C", name: "Urban Two Unit C",
+        uses: "Duplex / tandem house — 2 units; ADU rules expanded citywide Dec 2024",
+        maxUnits: 2, coverage: 0.375, stories: 2.5, heightFt: 30,
+        setbacks: { front: "block-sensitive, else 20 ft", side: "5 ft", rear: "12 ft (alley) / 20 ft" },
+        setbackFt: { front: 20, side: 5, rear: 20 },
+        source: "DZC Art. 5, Div. 5.3 duplex form table (read from the published code)",
+        notes: "Min zone lot 5,500 sf / 50 ft wide. A third accessory unit may be possible under the 2024 citywide ADU ordinance — verify composition with CPD.",
+      },
+      {
+        code: "S-SU-D", name: "Suburban Single Unit D",
+        uses: "1 house + 1 ADU (ADUs citywide since Dec 2024)",
+        maxUnits: 2, coverage: 0.375, stories: 2.5, heightFt: 30,
+        setbacks: { front: "20 ft (block-sensitive)", side: "5 ft", rear: "per form table — verify with CPD" },
+        source: "DZC Art. 3 (Suburban House form); min lot 6,000 sf",
+        notes: "Rear setback varies by form/alley — not encoded, so no footprint bound in this district.",
+      },
+      {
+        code: "S-SU-F", name: "Suburban Single Unit F",
+        uses: "1 house + 1 ADU (ADUs citywide since Dec 2024)",
+        maxUnits: 2, coverage: 0.375, stories: 2.5, heightFt: 30,
+        setbacks: { front: "20 ft (block-sensitive)", side: "5 ft", rear: "per form table — verify with CPD" },
+        source: "DZC Art. 3 (Suburban House form); min lot 8,500 sf",
+      },
+      {
+        code: "E-SU-D", name: "Urban Edge Single Unit D (incl. -DX variants)",
+        uses: "1 house + 1 ADU (the 'x' ADU suffix is redundant since Dec 2024)",
+        maxUnits: 2, stories: 2.5, heightFt: 30,
+        setbacks: { front: "per form table — verify", side: "per form table — verify", rear: "per form table — verify" },
+        source: "DZC Art. 4 (Urban Edge); min lot 6,000 sf",
+        notes: "Published third-party setback/coverage figures conflict for E-context — Pencil shows only what's verified; use the DZC form table for exact yards.",
+      },
+    ],
+  },
 };
 
 /** ArcGIS layer self-discovery + point query, reusing the permits pattern. */
