@@ -57,6 +57,37 @@ export function loadGoogleMaps(key: string): Promise<any> {
   return loader;
 }
 
+/** Full geocode: address → coordinates + city/state (from address components). */
+export async function geocodeAddress(
+  key: string,
+  address: string,
+): Promise<{ lat: number; lng: number; city: string; state: string; formatted: string } | null> {
+  try {
+    const g = await loadGoogleMaps(key);
+    const geocoder = new g.maps.Geocoder();
+    const res = await geocoder.geocode({ address });
+    const first = res.results?.[0];
+    const loc = first?.geometry?.location;
+    if (!loc) return null;
+    const comps: { types: string[]; long_name: string; short_name: string }[] = first.address_components ?? [];
+    const find = (t: string, short = false) => {
+      const c = comps.find((x) => x.types.includes(t));
+      return c ? (short ? c.short_name : c.long_name) : "";
+    };
+    return {
+      lat: loc.lat(),
+      lng: loc.lng(),
+      city: find("locality") || find("sublocality") || find("administrative_area_level_2"),
+      state: find("administrative_area_level_1", true),
+      formatted: first.formatted_address ?? address,
+    };
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn("[Pencil] geocode unavailable:", (e as Error).message);
+    return null;
+  }
+}
+
 /** Geocode an address via Google and return its distance (m) from our pin. */
 export async function geocodeVerify(
   key: string,

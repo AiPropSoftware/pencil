@@ -17,7 +17,8 @@ import { fetchSoldRates } from "@/providers/sold/socrataSales";
 import { setLiveSaleRates } from "@/lib/underwrite/liveSaleRates";
 import { fetchMlsListings } from "@/providers/listings/mls";
 import { discoverCityPermits } from "@/providers/permits/discovery";
-import { geocodeVerify } from "@/lib/googleMaps";
+import { geocodeVerify, geocodeAddress } from "@/lib/googleMaps";
+import { CITY_ZONING, zoneAtPoint, zoneAtAddress, matchZoneRules, envelope, type CityZoning, type ZoneRules } from "@/lib/zoning/zoning";
 import { GoogleMapView } from "@/components/GoogleMapView";
 
 // Heavy libraries load on demand, never on first paint: Leaflet only when the
@@ -94,6 +95,8 @@ export default function MapPage() {
   const [dealsOnly, setDealsOnly] = React.useState(false);
   const [fly, setFly] = React.useState<{ lat: number; lng: number } | null>(null);
   const [basemap, setBasemap] = React.useState<"streets" | "satellite" | "google">("google");
+
+  const [zoning, setZoning] = React.useState<null | { address: string; lotSqft?: number }>(null);
 
   // Watchlist — hearts persist across visits.
   const { ids: watched, toggle: toggleWatch } = useWatchlist();
@@ -314,6 +317,12 @@ export default function MapPage() {
           >
             <Heart className={`h-4 w-4 ${watchOnly ? "text-gold fill-current" : ""}`} /> Watchlist{watched.size > 0 ? ` (${watched.size})` : ""}
           </button>
+          <button
+            onClick={() => setZoning({ address: "" })}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm font-medium text-foreground/90 transition-colors hover:bg-secondary"
+          >
+            <ScrollText className="h-4 w-4" /> Zoning
+          </button>
           <LiveStatusChip live={live} lastUpdated={lastUpdated} />
         </div>
         {/* Filter chips */}
@@ -474,8 +483,13 @@ export default function MapPage() {
           watched={watched.has(selected.data.id)}
           onWatch={() => toggleWatch(selected.data.id)}
           onClose={() => select(null)}
+          onCheckZoning={() => setZoning({
+            address: /\d/.test(selected.data.name) ? `${selected.data.name}, ${selected.data.city}, ${selected.data.state}` : "",
+            lotSqft: selected.data.sqftEstimated ? undefined : selected.data.landSqft,
+          })}
         />
       )}
+      {zoning && <ZoningPanel init={zoning} onClose={() => setZoning(null)} />}
       {selected?.kind === "listing" && (
         <ListingPanel
           listing={selected.data}
@@ -621,6 +635,192 @@ function ListingCard({ l, selected, watched, onWatch, onClick }: { l: Listing; s
 }
 
 // ── Shared panel bits ───────────────────────────────────────────────────────
+/**
+ * Zoning X-ray — address in, what-the-bylaw-allows out. Three honesty tiers:
+ * live GIS + verified rules (Austin), verified rules with manual zone pick
+ * (Chicago), no-zoning special case (Houston), and a works-anywhere manual
+ * mode where the user types the numbers straight from their city's code.
+ */
+function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: number }; onClose: () => void }) {
+  const [address, setAddress] = React.useState(init.address);
+  const [lotSqft, setLotSqft] = React.useState(init.lotSqft ?? 0);
+  const [busy, setBusy] = React.useState(false);
+  const [res, setRes] = React.useState<null | {
+    formatted: string; city: string; state: string;
+    cityInfo: CityZoning | null; rawZone: string | null; rules: ZoneRules | null;
+  }>(null);
+  const [pickedZone, setPickedZone] = React.useState("");
+  // Manual mode — the user's own numbers from their city's code.
+  const [mFar, setMFar] = React.useState(0);
+  const [mCov, setMCov] = React.useState(0);
+  const [mStories, setMStories] = React.useState(0);
+  const [mLotPerUnit, setMLotPerUnit] = React.useState(0);
+
+  async function check() {
+    if (!address.trim()) { toast.error("Enter an address first."); return; }
+    setBusy(true); setRes(null); setPickedZone("");
+    const geo = await geocodeAddress(GOOGLE_MAPS_KEY, address);
+    if (!geo) { toast.error("Couldn't locate that address — check the spelling."); setBusy(false); return; }
+    const key = Object.keys(CITY_ZONING).find(
+      (c) => c.toLowerCase() === geo.city.toLowerCase() && CITY_ZONING[c].state === geo.state,
+    );
+    const cityInfo = key ? CITY_ZONING[key] : null;
+    // Address-matched open-data table first (most precise), GIS point second.
+    let rawZone: string | null = null;
+    if (cityInfo?.socrataZoning) rawZone = await zoneAtAddress(cityInfo.socrataZoning, geo.formatted.split(",")[0]);
+    if (!rawZone && cityInfo?.gisServer) rawZone = await zoneAtPoint(cityInfo.gisServer, geo.lat, geo.lng);
+    const rules = cityInfo && rawZone ? matchZoneRules(cityInfo, rawZone) : null;
+    setRes({ formatted: geo.formatted, city: geo.city, state: geo.state, cityInfo, rawZone, rules });
+    setBusy(false);
+  }
+
+  const activeRules: ZoneRules | null =
+    res?.rules ?? (res?.cityInfo?.zones?.find((z) => z.code === pickedZone) ?? null);
+  const env = activeRules
+    ? envelope(lotSqft, activeRules)
+    : envelope(lotSqft, {
+        far: mFar > 0 ? mFar : undefined,
+        coverage: mCov > 0 ? mCov / 100 : undefined,
+        stories: mStories > 0 ? mStories : undefined,
+        minLotPerUnitSqft: mLotPerUnit > 0 ? mLotPerUnit : undefined,
+      });
+  const gov = res ? govLinksFor(res.city, res.state) : null;
+
+  return (
+    <Drawer onClose={onClose}>
+      <div className="p-6">
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="stat-label flex items-center gap-1.5"><ScrollText className="h-3.5 w-3.5 text-gold" /> Zoning X-ray</div>
+            <h2 className="mt-1 font-display text-2xl">What can be built here?</h2>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
+        </div>
+
+        <div className="mt-5 space-y-2">
+          <Input placeholder="Street address, city, state" value={address} onChange={(e) => setAddress(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") check(); }} />
+          <div className="grid grid-cols-[1fr_auto] gap-2">
+            <NumericField label="Lot size (sf)" value={lotSqft} onChange={setLotSqft} />
+            <Button variant="gold" className="self-end" onClick={check} disabled={busy}>
+              {busy ? "Checking…" : "Check zoning"}
+            </Button>
+          </div>
+        </div>
+
+        {res && (
+          <div className="mt-6 space-y-5">
+            <p className="text-xs text-muted-foreground">{res.formatted}</p>
+
+            {res.cityInfo?.noZoning && (
+              <div className="rounded-md border border-gold/40 bg-gold-muted/30 p-4 text-sm leading-relaxed">
+                <p className="font-medium">No zoning in {res.city}.</p>
+                <p className="mt-1.5 text-foreground/85">{res.cityInfo.noZoning}</p>
+                <a href={res.cityInfo.codeUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-gold hover:underline">
+                  {res.cityInfo.codeName} <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+            )}
+
+            {!res.cityInfo?.noZoning && (
+              <>
+                <div className="rounded-md border border-border bg-card p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="stat-label">District</div>
+                    {res.rawZone
+                      ? <Badge variant="gold" title="From the city's own public zoning records">{res.rawZone}</Badge>
+                      : <span className="text-xs text-muted-foreground">not auto-detected here</span>}
+                  </div>
+                  {res.rawZone && <p className="mt-1.5 text-[11px] text-muted-foreground">Zone read live from {res.city}'s public zoning records.</p>}
+                  {res.cityInfo?.zones && !res.rules && (
+                    <div className="mt-3">
+                      <div className="stat-label mb-1">{res.rawZone ? "Rules for this exact district aren't in our verified table yet — pick the closest:" : "Pick the district (see the city's zoning map):"}</div>
+                      <select
+                        value={pickedZone}
+                        onChange={(e) => setPickedZone(e.target.value)}
+                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="">Select a district…</option>
+                        {res.cityInfo.zones.map((z) => <option key={z.code} value={z.code}>{z.code} — {z.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {activeRules && (
+                  <div className="rounded-md border border-border bg-card p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="font-medium text-sm">{activeRules.code} · {activeRules.name}</div>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">{activeRules.uses}</p>
+                    <div className="mt-3 space-y-1">
+                      {activeRules.setbacks && <>
+                        <Row label="Front setback" value={activeRules.setbacks.front} />
+                        <Row label="Side setback" value={activeRules.setbacks.side} />
+                        <Row label="Rear setback" value={activeRules.setbacks.rear} />
+                      </>}
+                      {activeRules.heightFt != null && <Row label="Max height" value={`${activeRules.heightFt} ft${activeRules.stories ? ` (~${activeRules.stories} stories)` : ""}`} />}
+                      {activeRules.far != null && <Row label="FAR" value={String(activeRules.far)} />}
+                      {activeRules.coverage != null && <Row label="Max coverage" value={`${Math.round(activeRules.coverage * 100)}%`} />}
+                      {activeRules.minLotPerUnitSqft != null && <Row label="Min lot per unit" value={`${fmtNumber(activeRules.minLotPerUnitSqft)} sf`} />}
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground">Source: {activeRules.source}{activeRules.notes ? ` — ${activeRules.notes}` : ""}</p>
+                  </div>
+                )}
+
+                {!res.cityInfo && (
+                  <div className="rounded-md border border-border bg-card p-4">
+                    <p className="text-sm text-foreground/90">
+                      {res.city} isn't in Pencil's verified zoning table yet. Open the city's zoning code below,
+                      find your district's numbers, and type them here — the math is then exact for your bylaw.
+                    </p>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <NumericField label="FAR (e.g. 1.2)" value={mFar} onChange={setMFar} />
+                      <NumericField label="Coverage %" value={mCov} onChange={setMCov} />
+                      <NumericField label="Max stories" value={mStories} onChange={setMStories} />
+                      <NumericField label="Lot sf per unit" value={mLotPerUnit} onChange={setMLotPerUnit} />
+                    </div>
+                  </div>
+                )}
+
+                <div className="rounded-md border border-gold/40 bg-gold-muted/30 p-4">
+                  <div className="stat-label">Build envelope on {lotSqft > 0 ? `${fmtNumber(lotSqft)} sf` : "your lot"}</div>
+                  {lotSqft <= 0 && <p className="mt-1.5 text-sm text-muted-foreground">Enter the lot size above to compute units and buildable area.</p>}
+                  {lotSqft > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {env.units != null && <Row label="Units allowed" value={`up to ${env.units}`} />}
+                      {env.buildableSqft != null
+                        ? <Row label={`Max buildable (${env.binding})`} value={`~${fmtNumber(env.buildableSqft)} sf`} />
+                        : <p className="text-sm text-muted-foreground">Add FAR or coverage + stories to compute buildable area.</p>}
+                    </div>
+                  )}
+                  {env.buildableSqft != null && lotSqft > 0 && (
+                    <Button variant="gold" className="mt-3 w-full" asChild>
+                      <Link to={`/deal-analyzer?totalSqft=${env.buildableSqft}&address=${encodeURIComponent(res.formatted)}`}>
+                        Underwrite this envelope <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  )}
+                </div>
+
+                {gov && (
+                  <a href={gov.zoning} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-gold hover:underline">
+                    Open the official {res.city} zoning code <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
+              </>
+            )}
+
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              Zoning is parcel-specific — overlays, historic districts, and deed restrictions can change
+              everything. Treat this as a starting point and verify with the city before you buy. Not legal advice.
+            </p>
+          </div>
+        )}
+      </div>
+    </Drawer>
+  );
+}
+
 function Drawer({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[2000] grid place-items-end" onClick={onClose}>
@@ -857,7 +1057,7 @@ function ShareWatchRow({ id, watched, onWatch }: { id: string; watched: boolean;
   );
 }
 
-function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development; watched: boolean; onWatch: () => void; onClose: () => void }) {
+function DevelopmentPanel({ dev, watched, onWatch, onClose, onCheckZoning }: { dev: Development; watched: boolean; onWatch: () => void; onClose: () => void; onCheckZoning: () => void }) {
   const hasContractor = dev.developer && dev.developer !== "Permit holder on file";
   const builderHref = hasContractor
     ? `https://www.google.com/search?q=${encodeURIComponent(`${dev.developer} ${dev.city} ${dev.state} home builder`)}`
@@ -888,6 +1088,13 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
         <ShareWatchRow id={dev.id} watched={watched} onWatch={onWatch} />
 
         <StreetWalk lat={dev.lat} lng={dev.lng} />
+
+        <button
+          onClick={onCheckZoning}
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-md border border-gold/40 bg-gold-muted/30 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-gold-muted/60"
+        >
+          <ScrollText className="h-4 w-4 text-gold" /> What can be built here? — check zoning
+        </button>
 
         <div className="mt-6 grid grid-cols-2 gap-3">
           <Metric icon={Building2} label="Units" value={fmtNumber(dev.units)} />
