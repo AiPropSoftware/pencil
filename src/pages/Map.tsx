@@ -17,8 +17,8 @@ import { fetchSoldRates } from "@/providers/sold/socrataSales";
 import { setLiveSaleRates } from "@/lib/underwrite/liveSaleRates";
 import { fetchMlsListings } from "@/providers/listings/mls";
 import { discoverCityPermits } from "@/providers/permits/discovery";
-import { geocodeVerify, geocodeAddress } from "@/lib/googleMaps";
-import { CITY_ZONING, zoneAtPoint, zoneAtAddress, matchZoneRules, envelope, type CityZoning, type ZoneRules } from "@/lib/zoning/zoning";
+import { geocodeVerify, geocodeAddress, suggestAddresses, type AddressSuggestion } from "@/lib/googleMaps";
+import { CITY_ZONING, zoneAtPoint, zoneAtAddress, parcelAtAddress, matchZoneRules, envelope, type CityZoning, type ZoneRules, type ParcelInfo } from "@/lib/zoning/zoning";
 import { GoogleMapView } from "@/components/GoogleMapView";
 
 // Heavy libraries load on demand, never on first paint: Leaflet only when the
@@ -648,6 +648,7 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
   const [res, setRes] = React.useState<null | {
     formatted: string; city: string; state: string;
     cityInfo: CityZoning | null; rawZone: string | null; rules: ZoneRules | null;
+    parcel: ParcelInfo | null;
   }>(null);
   const [pickedZone, setPickedZone] = React.useState("");
   // Manual mode — the user's own numbers from their city's code.
@@ -655,22 +656,51 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
   const [mCov, setMCov] = React.useState(0);
   const [mStories, setMStories] = React.useState(0);
   const [mLotPerUnit, setMLotPerUnit] = React.useState(0);
+  // Address typeahead.
+  const [sugs, setSugs] = React.useState<AddressSuggestion[]>([]);
+  const [sugOpen, setSugOpen] = React.useState(false);
+  const sugTimer = React.useRef<number | undefined>(undefined);
+  // Whether the lot field holds an auto-filled value (safe to overwrite).
+  const lotAutoRef = React.useRef(false);
 
-  async function check() {
-    if (!address.trim()) { toast.error("Enter an address first."); return; }
+  function onAddressChange(v: string) {
+    setAddress(v);
+    window.clearTimeout(sugTimer.current);
+    if (v.trim().length < 5) { setSugs([]); setSugOpen(false); return; }
+    sugTimer.current = window.setTimeout(async () => {
+      const s = await suggestAddresses(GOOGLE_MAPS_KEY, v);
+      setSugs(s); setSugOpen(s.length > 0);
+    }, 250);
+  }
+
+  async function check(addrOverride?: string) {
+    const addr = (addrOverride ?? address).trim();
+    if (!addr) { toast.error("Enter an address first."); return; }
+    setSugOpen(false);
     setBusy(true); setRes(null); setPickedZone("");
-    const geo = await geocodeAddress(GOOGLE_MAPS_KEY, address);
+    const geo = await geocodeAddress(GOOGLE_MAPS_KEY, addr);
     if (!geo) { toast.error("Couldn't locate that address — check the spelling."); setBusy(false); return; }
     const key = Object.keys(CITY_ZONING).find(
       (c) => c.toLowerCase() === geo.city.toLowerCase() && CITY_ZONING[c].state === geo.state,
     );
     const cityInfo = key ? CITY_ZONING[key] : null;
-    // Address-matched open-data table first (most precise), GIS point second.
-    let rawZone: string | null = null;
-    if (cityInfo?.socrataZoning) rawZone = await zoneAtAddress(cityInfo.socrataZoning, geo.formatted.split(",")[0]);
+    const street = geo.formatted.split(",")[0];
+    // City zoning table + parcel record in parallel; GIS point query as backup.
+    let [rawZone, parcel] = await Promise.all([
+      cityInfo?.socrataZoning ? zoneAtAddress(cityInfo.socrataZoning, street) : Promise.resolve(null),
+      parcelAtAddress(geo.city, geo.state, street),
+    ]);
+    if (!rawZone && parcel?.zone) rawZone = parcel.zone;
     if (!rawZone && cityInfo?.gisServer) rawZone = await zoneAtPoint(cityInfo.gisServer, geo.lat, geo.lng);
     const rules = cityInfo && rawZone ? matchZoneRules(cityInfo, rawZone) : null;
-    setRes({ formatted: geo.formatted, city: geo.city, state: geo.state, cityInfo, rawZone, rules });
+    // Recorded lot area fills the lot field unless the user typed their own.
+    if (parcel?.lotSqft && (lotSqft === 0 || lotAutoRef.current)) {
+      setLotSqft(parcel.lotSqft);
+      lotAutoRef.current = true;
+    }
+    // Recorded max residential FAR seeds manual mode (user can still edit).
+    if (parcel?.residFar) setMFar((prev) => (prev > 0 ? prev : parcel!.residFar!));
+    setRes({ formatted: geo.formatted, city: geo.city, state: geo.state, cityInfo, rawZone, rules, parcel });
     setBusy(false);
   }
 
@@ -698,13 +728,41 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
         </div>
 
         <div className="mt-5 space-y-2">
-          <Input placeholder="Street address, city, state" value={address} onChange={(e) => setAddress(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") check(); }} />
+          <div className="relative">
+            <Input
+              placeholder="Street address, city, state"
+              value={address}
+              onChange={(e) => onAddressChange(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") check(); }}
+              onBlur={() => window.setTimeout(() => setSugOpen(false), 150)}
+            />
+            {sugOpen && (
+              <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-md border border-border bg-card shadow-elevated">
+                {sugs.map((s) => (
+                  <button
+                    key={s.placeId}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => { setAddress(s.description); setSugs([]); setSugOpen(false); check(s.description); }}
+                    className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
+                  >
+                    {s.description}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-[1fr_auto] gap-2">
-            <NumericField label="Lot size (sf)" value={lotSqft} onChange={setLotSqft} />
-            <Button variant="gold" className="self-end" onClick={check} disabled={busy}>
+            <NumericField label="Lot size (sf)" value={lotSqft} onChange={(v) => { lotAutoRef.current = false; setLotSqft(v); }} />
+            <Button variant="gold" className="self-end" onClick={() => check()} disabled={busy}>
               {busy ? "Checking…" : "Check zoning"}
             </Button>
           </div>
+          {res?.parcel?.lotSqft != null && lotAutoRef.current && (
+            <p className="text-[11px] text-muted-foreground">
+              Lot size auto-filled from {res.parcel.source} — edit it if it looks wrong.
+            </p>
+          )}
         </div>
 
         {res && (
@@ -779,6 +837,11 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
                       <NumericField label="Max stories" value={mStories} onChange={setMStories} />
                       <NumericField label="Lot sf per unit" value={mLotPerUnit} onChange={setMLotPerUnit} />
                     </div>
+                    {res.parcel?.residFar != null && (
+                      <p className="mt-2 text-[11px] text-muted-foreground">
+                        FAR prefilled with the max residential FAR ({res.parcel.residFar}) recorded for this lot in {res.parcel.source}.
+                      </p>
+                    )}
                   </div>
                 )}
 

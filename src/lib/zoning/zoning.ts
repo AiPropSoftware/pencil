@@ -171,13 +171,19 @@ function pickZoneValue(rec: Record<string, unknown>): string | null {
  * (Socrata full-text search — schema-agnostic, so a portal-side rename
  * degrades to null instead of a wrong answer).
  */
+/** House number + street name, suffix dropped ("Ln" vs "LANE") and ordinals
+ * bared ("5th" → "5", matching how assessor tables store numbered streets). */
+function streetQuery(streetAddress: string): string {
+  const m = streetAddress.trim().match(
+    /^(\d+[A-Za-z]?)\s+([A-Za-z0-9'. -]+?)(?:\s+(?:st|street|ave|avenue|blvd|boulevard|dr|drive|ln|lane|rd|road|ct|court|cir|circle|way|pl|place|trl|trail|pkwy|parkway|cv|cove|loop|bnd|bend|pass|path|run|holw|hollow|ter|terrace|hwy|highway|expy|expressway))?\.?\s*$/i,
+  );
+  const q = m ? `${m[1]} ${m[2]}` : streetAddress.trim();
+  return q.replace(/(\d+)(?:st|nd|rd|th)\b/gi, "$1");
+}
+
 export async function zoneAtAddress(datasetUrl: string, streetAddress: string): Promise<string | null> {
   try {
-    // Search on house number + street name; drop the suffix ("Ln" vs "LANE").
-    const m = streetAddress.trim().match(
-      /^(\d+[A-Za-z]?)\s+([A-Za-z0-9'. -]+?)(?:\s+(?:st|street|ave|avenue|blvd|boulevard|dr|drive|ln|lane|rd|road|ct|court|cir|circle|way|pl|place|trl|trail|pkwy|parkway|cv|cove|loop|bnd|bend|pass|path|run|holw|hollow|ter|terrace|hwy|highway|expy|expressway))?\.?\s*$/i,
-    );
-    const q = m ? `${m[1]} ${m[2]}` : streetAddress.trim();
+    const q = streetQuery(streetAddress);
     const res = await fetch(`${datasetUrl}?$q=${encodeURIComponent(q)}&$limit=8`, {
       headers: { Accept: "application/json" },
     });
@@ -198,6 +204,102 @@ export async function zoneAtAddress(datasetUrl: string, streetAddress: string): 
 export function matchZoneRules(city: CityZoning, rawZone: string): ZoneRules | null {
   const z = rawZone.toUpperCase();
   return city.zones?.find((r) => z === r.code || z.startsWith(`${r.code}-`)) ?? null;
+}
+
+export interface ParcelInfo {
+  /** Deeded/recorded lot area straight from the city or county parcel table. */
+  lotSqft?: number;
+  /** Zoning district recorded on the parcel (e.g. NYC PLUTO ZoneDist1). */
+  zone?: string;
+  /** Max residential FAR recorded on the parcel (NYC PLUTO ResidFAR). */
+  residFar?: number;
+  /** Where the numbers come from — shown in the UI. */
+  source: string;
+}
+
+interface ParcelSource {
+  match: (city: string, state: string) => boolean;
+  /** Socrata resource URL. */
+  url: string;
+  source: string;
+  /** Known-schema field names; omitted → strict schema-agnostic probing. */
+  fields?: { lot: string; zone?: string; residFar?: string; address: string };
+}
+
+const PARCEL_SOURCES: ParcelSource[] = [
+  {
+    // NYC PLUTO — the Dept. of City Planning's canonical tax-lot table.
+    // Fields per the published PLUTO data dictionary.
+    match: (c, s) => s === "NY" && /^(new york|manhattan|brooklyn|the bronx|bronx|queens|staten island)$/i.test(c),
+    url: "https://data.cityofnewyork.us/resource/64uk-42ks.json",
+    source: "NYC PLUTO (Dept. of City Planning)",
+    fields: { lot: "lotarea", zone: "zonedist1", residFar: "residfar", address: "address" },
+  },
+  {
+    // Cook County Assessor parcel universe — schema probed, never guessed.
+    match: (c, s) => s === "IL" && /^chicago$/i.test(c),
+    url: "https://datacatalog.cookcountyil.gov/resource/nj4t-kc8j.json",
+    source: "Cook County Assessor parcel records",
+  },
+];
+
+const num = (x: unknown): number | undefined => {
+  const n = Number(x);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+};
+
+/** Sane recorded-lot-area range: rejects flags, codes, and valuation fields. */
+const saneLot = (n: number | undefined): number | undefined =>
+  n != null && n >= 200 && n <= 2_000_000 ? Math.round(n) : undefined;
+
+/**
+ * Look the address up in the city/county's own parcel table: recorded lot
+ * area, and where the table carries them, the zoning district and max
+ * residential FAR. Requires a house-number match — no match, no guess.
+ */
+export async function parcelAtAddress(city: string, state: string, streetAddress: string): Promise<ParcelInfo | null> {
+  const src = PARCEL_SOURCES.find((s) => s.match(city, state));
+  if (!src) return null;
+  try {
+    const q = streetQuery(streetAddress);
+    const res = await fetch(`${src.url}?$q=${encodeURIComponent(q)}&$limit=10`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const rows = (await res.json()) as Record<string, unknown>[];
+    if (!Array.isArray(rows) || !rows.length) return null;
+    const houseNo = q.split(/\s+/)[0].toUpperCase();
+    const addressKeyOf = (row: Record<string, unknown>) =>
+      src.fields?.address ?? Object.keys(row).find((k) => /address/i.test(k) && typeof row[k] === "string");
+    const pick = rows.find((r) => {
+      const ak = addressKeyOf(r);
+      return ak && typeof r[ak] === "string" && (r[ak] as string).trim().toUpperCase().startsWith(houseNo + " ");
+    });
+    if (!pick) return null;
+    let lotSqft: number | undefined;
+    let zone: string | undefined;
+    let residFar: number | undefined;
+    if (src.fields) {
+      lotSqft = saneLot(num(pick[src.fields.lot]));
+      if (src.fields.zone) {
+        const z = pick[src.fields.zone];
+        if (typeof z === "string" && z.trim()) zone = z.trim();
+      }
+      if (src.fields.residFar) residFar = num(pick[src.fields.residFar]);
+    } else {
+      for (const [k, v] of Object.entries(pick)) {
+        if (/(^|_)(land|lot)_?(sq_?ft|sf|size|area)/i.test(k) && !/val|price|tax|assess|code|flag/i.test(k)) {
+          const n = saneLot(num(v));
+          if (n) { lotSqft = n; break; }
+        }
+      }
+      zone = pickZoneValue(pick) ?? undefined;
+    }
+    if (lotSqft == null && !zone && residFar == null) return null;
+    return { lotSqft, zone, residFar, source: src.source };
+  } catch {
+    return null;
+  }
 }
 
 export interface Envelope {

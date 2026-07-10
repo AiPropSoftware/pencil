@@ -57,6 +57,65 @@ export function loadGoogleMaps(key: string): Promise<any> {
   return loader;
 }
 
+export interface AddressSuggestion {
+  description: string;
+  placeId: string;
+}
+
+// Which Places generation this key supports — probed once, then cached so a
+// key without Places enabled doesn't throw on every keystroke.
+let placesMode: "new" | "legacy" | "none" | null = null;
+
+/**
+ * Address typeahead via Google Places Autocomplete. Tries the current
+ * AutocompleteSuggestion API first, falls back to the legacy
+ * AutocompleteService, and degrades to no suggestions (never an error) when
+ * Places isn't enabled on the key.
+ */
+export async function suggestAddresses(key: string, input: string): Promise<AddressSuggestion[]> {
+  const text = input.trim();
+  if (text.length < 5 || placesMode === "none") return [];
+  try {
+    const g = await loadGoogleMaps(key);
+    if (!g.maps.importLibrary) { placesMode = "none"; return []; }
+    const places: any = await g.maps.importLibrary("places");
+    if (placesMode !== "legacy" && places.AutocompleteSuggestion?.fetchAutocompleteSuggestions) {
+      try {
+        const { suggestions } = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+          input: text,
+          includedRegionCodes: ["us"],
+        });
+        placesMode = "new";
+        return (suggestions ?? [])
+          .map((s: any) => s.placePrediction)
+          .filter(Boolean)
+          .map((p: any) => ({ description: p.text?.text ?? String(p.text ?? ""), placeId: String(p.placeId ?? "") }))
+          .filter((p: AddressSuggestion) => p.description);
+      } catch {
+        placesMode = null; // fall through to legacy below
+      }
+    }
+    if (places.AutocompleteService) {
+      const svc = new places.AutocompleteService();
+      const preds: any[] = await new Promise((resolve) => {
+        svc.getPlacePredictions(
+          { input: text, componentRestrictions: { country: "us" }, types: ["address"] },
+          (p: any[] | null) => resolve(p ?? []),
+        );
+      });
+      if (preds.length) placesMode = "legacy";
+      return preds.map((p: any) => ({ description: p.description, placeId: p.place_id }));
+    }
+    placesMode = "none";
+    return [];
+  } catch (e) {
+    placesMode = "none";
+    // eslint-disable-next-line no-console
+    console.warn("[Pencil] address suggestions unavailable:", (e as Error).message);
+    return [];
+  }
+}
+
 /** Full geocode: address → coordinates + city/state (from address components). */
 export async function geocodeAddress(
   key: string,

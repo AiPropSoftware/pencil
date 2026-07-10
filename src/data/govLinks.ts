@@ -238,8 +238,12 @@ const CITY_GOV: Record<string, GovLinks> = {
   },
 };
 
+// Boroughs geocode as their own "city" but belong to New York's portals.
+const NY_BOROUGHS = new Set(["Brooklyn", "Manhattan", "Queens", "The Bronx", "Bronx", "Staten Island"]);
+
 export function govLinksFor(city: string, state: string): GovLinks & { official: boolean } {
-  const g = CITY_GOV[city];
+  const key = state === "NY" && NY_BOROUGHS.has(city) ? "New York" : city;
+  const g = CITY_GOV[key];
   if (g) return { ...g, official: true };
   const q = (s: string) => `https://www.google.com/search?q=${encodeURIComponent(`${city} ${state} ${s}`)}`;
   return {
