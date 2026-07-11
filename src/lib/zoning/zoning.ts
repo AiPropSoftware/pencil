@@ -676,7 +676,9 @@ export interface ParcelInfo {
 
 interface ParcelSource {
   match: (city: string, state: string) => boolean;
-  /** Socrata resource URL. */
+  /** "socrata" (default): address-matched open-data table. "arcgis": county GIS point query. */
+  kind?: "socrata" | "arcgis";
+  /** Socrata resource URL, or ArcGIS REST services root for kind "arcgis". */
   url: string;
   source: string;
   /** Known-schema field names; omitted → strict schema-agnostic probing. */
@@ -698,7 +700,78 @@ const PARCEL_SOURCES: ParcelSource[] = [
     url: "https://datacatalog.cookcountyil.gov/resource/nj4t-kc8j.json",
     source: "Cook County Assessor parcel records",
   },
+  {
+    // Miami-Dade County GIS parcels — covers every municipality in the county
+    // (Miami, Miami Beach, Coral Gables, Hialeah, …). Same server Pencil's
+    // live Miami permit discovery already uses from the browser.
+    match: (c, s) =>
+      s === "FL" &&
+      /^(miami|miami beach|north miami|north miami beach|miami gardens|miami lakes|miami springs|miami shores|coral gables|hialeah|hialeah gardens|doral|aventura|homestead|florida city|key biscayne|surfside|bal harbour|bay harbor islands|north bay village|sunny isles beach|golden beach|pinecrest|palmetto bay|cutler bay|south miami|west miami|sweetwater|opa-locka|el portal|biscayne park|virginia gardens|medley|indian creek)$/i.test(c),
+    kind: "arcgis",
+    url: "https://gisweb.miamidade.gov/arcgis/rest/services",
+    source: "Miami-Dade County GIS parcel records",
+  },
 ];
+
+/**
+ * County-GIS parcel at a point: self-discover a parcel layer under the REST
+ * root, query the polygon containing the geocoded point, and probe the record
+ * for a lot-size value (and a zoning code where the county carries one).
+ * Any miss returns null — never a guess. Request budget is kept small.
+ */
+async function arcgisParcelAtPoint(serverRoot: string, lat: number, lng: number): Promise<{ lotSqft?: number; zone?: string } | null> {
+  try {
+    const root = (await getJson(`${serverRoot}?f=json`)) as {
+      folders?: string[];
+      services?: { name: string; type: string }[];
+    };
+    const svcCandidates = (root.services ?? [])
+      .filter((s) => /(^|\/)(pa|parcel|property|cadastr)/i.test(s.name) && /Server$/.test(s.type))
+      .slice(0, 3);
+    // One folder level, only obviously property-related folders.
+    for (const f of (root.folders ?? []).filter((x) => /pa|parcel|property|cadastr/i.test(x)).slice(0, 2)) {
+      try {
+        const sub = (await getJson(`${serverRoot}/${f}?f=json`)) as { services?: { name: string; type: string }[] };
+        svcCandidates.push(...(sub.services ?? []).filter((s) => /Server$/.test(s.type)).slice(0, 2));
+      } catch { /* skip folder */ }
+    }
+    for (const svc of svcCandidates.slice(0, 4)) {
+      try {
+        const meta = (await getJson(`${serverRoot}/${svc.name}/${svc.type}?f=json`)) as {
+          layers?: { id: number; name: string }[];
+        };
+        const layer = meta.layers?.find((l) => /parcel/i.test(l.name) && !/label|anno|line|point|dissolve/i.test(l.name));
+        if (!layer) continue;
+        const q = new URLSearchParams({
+          geometry: `${lng},${lat}`,
+          geometryType: "esriGeometryPoint",
+          inSR: "4326",
+          spatialRel: "esriSpatialRelIntersects",
+          outFields: "*",
+          returnGeometry: "false",
+          f: "json",
+        });
+        const data = (await getJson(`${serverRoot}/${svc.name}/${svc.type}/${layer.id}/query?${q}`)) as {
+          features?: { attributes?: Record<string, unknown> }[];
+        };
+        const attrs = data.features?.[0]?.attributes;
+        if (!attrs) continue;
+        let lotSqft: number | undefined;
+        for (const [k, v] of Object.entries(attrs)) {
+          if (/^(lot_?size|land_?(sq_?ft|sqft|area|size)|parcel_?(area|size))/i.test(k) && !/val|price|tax|assess|bldg|building|year|code|flag/i.test(k)) {
+            const n = saneLot(num(v));
+            if (n) { lotSqft = n; break; }
+          }
+        }
+        const zone = pickZoneValue(attrs) ?? undefined;
+        if (lotSqft != null || zone) return { lotSqft, zone };
+      } catch { /* try next service */ }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 const num = (x: unknown): number | undefined => {
   const n = Number(x);
@@ -718,9 +791,20 @@ const saneDim = (n: number | undefined): number | undefined =>
  * area, and where the table carries them, the zoning district and max
  * residential FAR. Requires a house-number match — no match, no guess.
  */
-export async function parcelAtAddress(city: string, state: string, streetAddress: string): Promise<ParcelInfo | null> {
+export async function parcelAtAddress(
+  city: string,
+  state: string,
+  streetAddress: string,
+  lat?: number,
+  lng?: number,
+): Promise<ParcelInfo | null> {
   const src = PARCEL_SOURCES.find((s) => s.match(city, state));
   if (!src) return null;
+  if (src.kind === "arcgis") {
+    if (lat == null || lng == null) return null;
+    const hit = await arcgisParcelAtPoint(src.url, lat, lng);
+    return hit ? { ...hit, source: src.source } : null;
+  }
   try {
     const q = streetQuery(streetAddress);
     const res = await fetch(`${src.url}?$q=${encodeURIComponent(q)}&$limit=10`, {

@@ -694,7 +694,7 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
     // City zoning table + parcel record in parallel; GIS point query as backup.
     let [rawZone, parcel] = await Promise.all([
       cityInfo?.socrataZoning ? zoneAtAddress(cityInfo.socrataZoning, street) : Promise.resolve(null),
-      parcelAtAddress(geo.city, geo.state, street),
+      parcelAtAddress(geo.city, geo.state, street, geo.lat, geo.lng),
     ]);
     if (!rawZone && parcel?.zone) rawZone = parcel.zone;
     if (!rawZone && cityInfo?.gisServer) rawZone = await zoneAtPoint(cityInfo.gisServer, geo.lat, geo.lng);
