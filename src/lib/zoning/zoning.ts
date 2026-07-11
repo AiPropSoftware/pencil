@@ -708,7 +708,8 @@ const PARCEL_SOURCES: ParcelSource[] = [
       s === "FL" &&
       /^(miami|miami beach|north miami|north miami beach|miami gardens|miami lakes|miami springs|miami shores|coral gables|hialeah|hialeah gardens|doral|aventura|homestead|florida city|key biscayne|surfside|bal harbour|bay harbor islands|north bay village|sunny isles beach|golden beach|pinecrest|palmetto bay|cutler bay|south miami|west miami|sweetwater|opa-locka|el portal|biscayne park|virginia gardens|medley|indian creek)$/i.test(c),
     kind: "arcgis",
-    url: "https://gisweb.miamidade.gov/arcgis/rest/services",
+    // "Parcels @ PaParcel" lives under MD_LandInformation (layer self-discovered).
+    url: "https://gisweb.miamidade.gov/arcgis/rest/services/MD_LandInformation/MapServer",
     source: "Miami-Dade County GIS parcel records",
   },
 ];
@@ -719,56 +720,83 @@ const PARCEL_SOURCES: ParcelSource[] = [
  * for a lot-size value (and a zoning code where the county carries one).
  * Any miss returns null — never a guess. Request budget is kept small.
  */
-async function arcgisParcelAtPoint(serverRoot: string, lat: number, lng: number): Promise<{ lotSqft?: number; zone?: string } | null> {
+async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number): Promise<{ lotSqft?: number; zone?: string } | null> {
+  const diag = (msg: string, extra?: unknown) => {
+    // eslint-disable-next-line no-console
+    console.info("[Pencil] parcel lookup:", msg, extra ?? "");
+  };
   try {
-    const root = (await getJson(`${serverRoot}?f=json`)) as {
-      folders?: string[];
-      services?: { name: string; type: string }[];
-    };
-    const svcCandidates = (root.services ?? [])
-      .filter((s) => /(^|\/)(pa|parcel|property|cadastr)/i.test(s.name) && /Server$/.test(s.type))
-      .slice(0, 3);
-    // One folder level, only obviously property-related folders.
-    for (const f of (root.folders ?? []).filter((x) => /pa|parcel|property|cadastr/i.test(x)).slice(0, 2)) {
-      try {
-        const sub = (await getJson(`${serverRoot}/${f}?f=json`)) as { services?: { name: string; type: string }[] };
-        svcCandidates.push(...(sub.services ?? []).filter((s) => /Server$/.test(s.type)).slice(0, 2));
-      } catch { /* skip folder */ }
+    // Accept either a service URL (…/MapServer) or a REST root to discover from.
+    const services: string[] = [];
+    if (/\/(Map|Feature)Server\/?$/.test(serverUrl)) {
+      services.push(serverUrl.replace(/\/$/, ""));
+    } else {
+      const root = (await getJson(`${serverUrl}?f=json`)) as {
+        folders?: string[];
+        services?: { name: string; type: string }[];
+      };
+      const named = (root.services ?? [])
+        .filter((x) => /(^|\/)(pa|parcel|property|cadastr|land)/i.test(x.name) && /Server$/.test(x.type))
+        .slice(0, 3);
+      services.push(...named.map((x) => `${serverUrl}/${x.name}/${x.type}`));
+      for (const f of (root.folders ?? []).filter((x) => /pa|parcel|property|cadastr|land/i.test(x)).slice(0, 2)) {
+        try {
+          const sub = (await getJson(`${serverUrl}/${f}?f=json`)) as { services?: { name: string; type: string }[] };
+          services.push(...(sub.services ?? []).filter((x) => /Server$/.test(x.type)).slice(0, 2).map((x) => `${serverUrl}/${x.name}/${x.type}`));
+        } catch { /* skip folder */ }
+      }
     }
-    for (const svc of svcCandidates.slice(0, 4)) {
+    for (const svcUrl of services.slice(0, 4)) {
       try {
-        const meta = (await getJson(`${serverRoot}/${svc.name}/${svc.type}?f=json`)) as {
-          layers?: { id: number; name: string }[];
-        };
+        const meta = (await getJson(`${svcUrl}?f=json`)) as { layers?: { id: number; name: string }[] };
         const layer = meta.layers?.find((l) => /parcel/i.test(l.name) && !/label|anno|line|point|dissolve/i.test(l.name));
-        if (!layer) continue;
+        if (!layer) { diag("no parcel layer in", svcUrl); continue; }
         const q = new URLSearchParams({
           geometry: `${lng},${lat}`,
           geometryType: "esriGeometryPoint",
           inSR: "4326",
           spatialRel: "esriSpatialRelIntersects",
           outFields: "*",
-          returnGeometry: "false",
+          returnGeometry: "true",
+          outSR: "3857",
           f: "json",
         });
-        const data = (await getJson(`${serverRoot}/${svc.name}/${svc.type}/${layer.id}/query?${q}`)) as {
-          features?: { attributes?: Record<string, unknown> }[];
+        const data = (await getJson(`${svcUrl}/${layer.id}/query?${q}`)) as {
+          features?: { attributes?: Record<string, unknown>; geometry?: { rings?: number[][][] } }[];
         };
-        const attrs = data.features?.[0]?.attributes;
-        if (!attrs) continue;
+        const feat = data.features?.[0];
+        if (!feat?.attributes) { diag(`no parcel at point (layer "${layer.name}")`, svcUrl); continue; }
         let lotSqft: number | undefined;
-        for (const [k, v] of Object.entries(attrs)) {
+        for (const [k, v] of Object.entries(feat.attributes)) {
           if (/^(lot_?size|land_?(sq_?ft|sqft|area|size)|parcel_?(area|size))/i.test(k) && !/val|price|tax|assess|bldg|building|year|code|flag/i.test(k)) {
             const n = saneLot(num(v));
             if (n) { lotSqft = n; break; }
           }
         }
-        const zone = pickZoneValue(attrs) ?? undefined;
+        // No recorded lot-size attribute → measure the parcel polygon itself
+        // (Web Mercator shoelace, corrected by cos²(lat); ~exact at parcel scale).
+        if (lotSqft == null && feat.geometry?.rings?.length) {
+          let m2 = 0;
+          for (const ring of feat.geometry.rings) {
+            let a = 0;
+            for (let i = 0; i < ring.length - 1; i++) a += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+            m2 += a / 2; // outer rings CW (negative), holes CCW — summing signed areas nets holes out
+          }
+          const cos = Math.cos((lat * Math.PI) / 180);
+          lotSqft = saneLot(Math.abs(m2) * cos * cos * 10.7639);
+          if (lotSqft) diag("lot size computed from parcel boundary", lotSqft);
+        }
+        const zone = pickZoneValue(feat.attributes) ?? undefined;
+        diag("hit", { service: svcUrl, layer: layer.name, lotSqft, zone });
         if (lotSqft != null || zone) return { lotSqft, zone };
-      } catch { /* try next service */ }
+      } catch (e) {
+        diag(`service failed: ${(e as Error).message}`, svcUrl);
+      }
     }
+    diag("no usable parcel record found");
     return null;
-  } catch {
+  } catch (e) {
+    diag(`lookup failed: ${(e as Error).message}`);
     return null;
   }
 }

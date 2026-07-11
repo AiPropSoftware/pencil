@@ -25,7 +25,8 @@ import { GoogleMapView } from "@/components/GoogleMapView";
 // user switches off the Google basemap, Recharts only when a panel opens.
 const LeafletMapView = React.lazy(() => import("@/components/LeafletMapView"));
 const PriceHistoryChart = React.lazy(() => import("@/components/DealCharts").then((m) => ({ default: m.PriceHistoryChart })));
-import { scoreOpportunity, buildPpsf, PLAUSIBLE_MARGIN_CAP, HARD_MONEY_RATE } from "@/lib/underwrite/opportunity";
+import { scoreOpportunity, buildPpsf, PLAUSIBLE_MARGIN_CAP, buildMonthsFor } from "@/lib/underwrite/opportunity";
+import { calcDeal, defaultDeal } from "@/lib/calc/deal";
 import { setLiveBuildCosts, getLiveBuildCost } from "@/lib/underwrite/liveCosts";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { toast } from "sonner";
@@ -982,9 +983,12 @@ function InlineUnderwrite({
   const [sqft, setSqft] = React.useState(buildableSqft);
   const [bppsf, setBppsf] = React.useState(buildPpsf(city, type));
   const [sale, setSale] = React.useState(0);
-  // Blank (0) = use the modeled costs; any entry replaces the model.
-  const [finCost, setFinCost] = React.useState(0);
-  const [closingCost, setClosingCost] = React.useState(0);
+  // Financing knobs — same fields (and same math) as the full Deal Analyzer.
+  const [rate, setRate] = React.useState(defaultDeal.constructionRate);
+  const [months, setMonths] = React.useState(buildMonthsFor(type));
+  const [ltc, setLtc] = React.useState(0.85);
+  const [points, setPoints] = React.useState(defaultDeal.lenderFeesPct);
+  const [closingPct, setClosingPct] = React.useState(defaultDeal.closingCostsPct);
   // The land the user actually wants to buy: address → parcel + zoning → buildable sf.
   const [siteAddr, setSiteAddr] = React.useState("");
   const [siteSugs, setSiteSugs] = React.useState<AddressSuggestion[]>([]);
@@ -1043,18 +1047,29 @@ function InlineUnderwrite({
     if (siteBuildable) setSqft(siteBuildable);
   }, [siteBuildable]);
 
-  const opp = scoreOpportunity({
-    city, type, buildableSqft: sqft, areaPpsf: sale, landPrice: land, buildPpsfOverride: bppsf,
-    finCostOverride: finCost > 0 ? finCost : undefined,
-    closingCostOverride: closingCost > 0 ? closingCost : undefined,
+  const arv = Math.round(sale * sqft);
+  // Identical engine to the full Deal Analyzer — the two can never disagree.
+  const deal = calcDeal({
+    ...defaultDeal,
+    landCost: land, costPerSqft: bppsf, totalSqft: sqft,
+    closingCostsPct: closingPct, lenderFeesPct: points,
+    constructionRate: rate, monthsToBuild: months, ltcPct: ltc,
+    arv, applySellingCosts: true,
+    refiEnabled: false, partnerEnabled: false,
+    monthlyRent: 0, vacancyPct: 0, taxesMo: 0, insuranceMo: 0, maintenanceMo: 0, managementPct: 0, otherMo: 0,
   });
+  const sellingPctLabel = ((defaultDeal.salesCommissionPct + defaultDeal.saleClosingPct) * 100).toFixed(1);
+  const pct = (x: number) => {
+    const v = (x * 100).toFixed(1);
+    return v.endsWith(".0") ? v.slice(0, -2) : v;
+  };
   const ready = land > 0 && sale > 0 && sqft > 0;
-  const href = `/deal-analyzer?arv=${opp.arv}&costPerSqft=${bppsf}&totalSqft=${sqft}&landCost=${land}&productType=${encodeURIComponent(type)}&address=${encodeURIComponent(site?.formatted ?? address)}`;
+  const href = `/deal-analyzer?arv=${arv}&costPerSqft=${bppsf}&totalSqft=${sqft}&landCost=${land}&productType=${encodeURIComponent(type)}&address=${encodeURIComponent(site?.formatted ?? address)}`;
 
   return (
     <div className="mt-6 rounded-md border border-gold/40 bg-gold-muted/30 p-4">
       <div className="flex items-center justify-between mb-3">
-        <div className="stat-label flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-gold" /> Underwrite it</div>
+        <div className="stat-label flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-gold" /> Underwrite your deal</div>
       </div>
       <div className="mb-3">
         <div className="relative">
@@ -1115,28 +1130,37 @@ function InlineUnderwrite({
         <NumericField label="Build $/sf" value={bppsf} onChange={setBppsf} prefix="$" />
         <NumericField label="Sell $/sf" value={sale} onChange={setSale} prefix="$" />
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-2">
-        <NumericField label="Construction financing" value={finCost} onChange={setFinCost} prefix="$" />
-        <NumericField label="Closing costs" value={closingCost} onChange={setClosingCost} prefix="$" />
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        <NumericField label="Rate" value={rate} onChange={setRate} percent suffix="%" />
+        <NumericField label="Months" value={months} onChange={setMonths} />
+        <NumericField label="LTC" value={ltc} onChange={setLtc} percent suffix="%" />
+        <NumericField label="Points" value={points} onChange={setPoints} percent suffix="%" />
+        <NumericField label="Closing" value={closingPct} onChange={setClosingPct} percent suffix="%" />
       </div>
       {!ready && (
         <p className="mt-3 text-xs text-muted-foreground">Enter your land price and sell $/sf to underwrite this deal{sqft <= 0 ? " (and the sq ft you plan to build)" : ""}.</p>
       )}
       {ready && (
-      <div className="mt-3 space-y-1">
-        <Row label="Sells for (ARV)" value={fmtMoney(opp.arv)} />
-        <Row label={`Selling costs (${(opp.sellingPct * 100).toFixed(1)}% realtor + closing)`} value={fmtMoney(opp.sellingCosts)} />
-        <Row
-          label={finCost > 0
-            ? "Construction financing (your quote)"
-            : `Construction financing (85% LTC @ ${(HARD_MONEY_RATE * 100).toFixed(1)}% · ${opp.finMonths} mo + 2 pts)`}
-          value={fmtMoney(opp.financing)}
-        />
-        <Row label="All-in cost" value={fmtMoney(opp.atPrice?.allIn ?? 0)} />
+      <div className="mt-3 space-y-0.5">
+        <Row label="Sells for (ARV)" value={fmtMoney(arv)} />
+        <Row label={`Selling costs (${sellingPctLabel}% realtor + closing)`} value={fmtMoney(deal.sellingCosts)} />
+        <Row label="Hard construction" value={fmtMoney(deal.hardConstruction)} />
+        <Row label={`Closing costs (${pct(closingPct)}%)`} value={fmtMoney(deal.closingCosts)} />
+        <Row label={`Construction loan (${pct(ltc)}% LTC)`} value={fmtMoney(deal.constructionLoan)} />
+        <Row label={`Lender fees (${pct(points)} pts)`} value={fmtMoney(deal.lenderFees)} />
+        <Row label={`Total carry (${months} mo @ ${pct(rate)}%, ~${fmtMoney(deal.monthlyCarry)}/mo)`} value={fmtMoney(deal.totalCarry)} />
+        <div className="flex items-center justify-between text-sm py-1 border-t border-border/60 mt-1 pt-1.5">
+          <span className="font-medium text-foreground">All-in project cost</span>
+          <span className="font-semibold tabular-nums">{fmtMoney(deal.allInCost)}</span>
+        </div>
         <div className="flex items-center justify-between text-sm py-1">
-          <span className="text-muted-foreground">Profit</span>
-          <span className={`font-semibold tabular-nums ${(opp.atPrice?.profit ?? 0) >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-            {fmtMoney(opp.atPrice?.profit ?? 0)}
+          <span className="text-muted-foreground">Cash required</span>
+          <span className="font-semibold tabular-nums text-red-600">{fmtMoney(deal.cashRequired)}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm py-1">
+          <span className="font-medium text-foreground">Projected profit</span>
+          <span className={`font-semibold tabular-nums ${deal.projectedProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+            {fmtMoney(deal.projectedProfit)}
           </span>
         </div>
       </div>
