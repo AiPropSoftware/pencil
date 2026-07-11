@@ -58,8 +58,17 @@ export default function DealAnalyzer() {
     if (Number.isFinite(totalSqft) && totalSqft > 0) setInputs((p) => ({ ...p, totalSqft }));
     if (Number.isFinite(landCost) && landCost > 0) setInputs((p) => ({ ...p, landCost }));
     if (address) setInputs((p) => ({ ...p, address }));
+    // Financing knobs from the map's underwrite card (decimals in the URL).
+    const knob = (k: string) => { const v = params.get(k); return v == null ? null : Number(v); };
+    const rate = knob("rate"), months = knob("months"), ltc = knob("ltc"), points = knob("points"), closingPct = knob("closingPct");
+    if (rate != null && rate > 0 && rate < 1) setInputs((p) => ({ ...p, constructionRate: rate }));
+    if (months != null && months > 0 && months <= 60) setInputs((p) => ({ ...p, monthsToBuild: Math.round(months) }));
+    if (ltc != null && ltc > 0 && ltc <= 1) setInputs((p) => ({ ...p, ltcPct: ltc }));
+    if (points != null && points >= 0 && points < 0.2) setInputs((p) => ({ ...p, lenderFeesPct: points }));
+    if (closingPct != null && closingPct >= 0 && closingPct < 0.2) setInputs((p) => ({ ...p, closingCostsPct: closingPct }));
     // Single-family → build-to-sell (no refi/rental; selling costs apply).
-    if (productType === "SFH") {
+    // mode=sell forces it for any product type (the map card is build-to-sell).
+    if (productType === "SFH" || params.get("mode") === "sell") {
       setStrategy("sell");
       setInputs((p) => ({ ...p, refiEnabled: false, applySellingCosts: true }));
     }

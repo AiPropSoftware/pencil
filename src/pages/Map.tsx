@@ -667,8 +667,11 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
   const [sugs, setSugs] = React.useState<AddressSuggestion[]>([]);
   const [sugOpen, setSugOpen] = React.useState(false);
   const sugTimer = React.useRef<number | undefined>(undefined);
+  // Monotonic token: only the latest check() call may write state.
+  const checkSeq = React.useRef(0);
   // Whether the lot field holds an auto-filled value (safe to overwrite).
   const lotAutoRef = React.useRef(false);
+  React.useEffect(() => () => window.clearTimeout(sugTimer.current), []);
 
   function onAddressChange(v: string) {
     setAddress(v);
@@ -683,22 +686,30 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
   async function check(addrOverride?: string) {
     const addr = (addrOverride ?? address).trim();
     if (!addr) { toast.error("Enter an address first."); return; }
-    setSugOpen(false);
+    const seq = ++checkSeq.current;
+    window.clearTimeout(sugTimer.current);
+    setSugs([]); setSugOpen(false);
     setBusy(true); setRes(null); setPickedZone("");
     const geo = await geocodeAddress(GOOGLE_MAPS_KEY, addr);
+    if (seq !== checkSeq.current) return;
     if (!geo) { toast.error("Couldn't locate that address — check the spelling."); setBusy(false); return; }
     const key = Object.keys(CITY_ZONING).find(
       (c) => c.toLowerCase() === geo.city.toLowerCase() && CITY_ZONING[c].state === geo.state,
     );
     const cityInfo = key ? CITY_ZONING[key] : null;
     const street = geo.formatted.split(",")[0];
+    // Record lookups need a street-level geocode — a city/neighborhood
+    // centroid would hit some unrelated parcel and report its lot as fact.
+    const streetLevel = /^\d/.test(street);
     // City zoning table + parcel record in parallel; GIS point query as backup.
     let [rawZone, parcel] = await Promise.all([
-      cityInfo?.socrataZoning ? zoneAtAddress(cityInfo.socrataZoning, street) : Promise.resolve(null),
-      parcelAtAddress(geo.city, geo.state, street, geo.lat, geo.lng),
+      cityInfo?.socrataZoning && streetLevel ? zoneAtAddress(cityInfo.socrataZoning, street) : Promise.resolve(null),
+      streetLevel ? parcelAtAddress(geo.city, geo.state, street, geo.lat, geo.lng) : Promise.resolve(null),
     ]);
+    if (seq !== checkSeq.current) return;
     if (!rawZone && parcel?.zone) rawZone = parcel.zone;
-    if (!rawZone && cityInfo?.gisServer) rawZone = await zoneAtPoint(cityInfo.gisServer, geo.lat, geo.lng);
+    if (!rawZone && cityInfo?.gisServer && streetLevel) rawZone = await zoneAtPoint(cityInfo.gisServer, geo.lat, geo.lng);
+    if (seq !== checkSeq.current) return;
     const rules = cityInfo && rawZone ? matchZoneRules(cityInfo, rawZone) : null;
     // Recorded lot area fills the lot field unless the user typed their own.
     if (parcel?.lotSqft && (lotSqft === 0 || lotAutoRef.current)) {
@@ -994,8 +1005,14 @@ function InlineUnderwrite({
   const [siteSugs, setSiteSugs] = React.useState<AddressSuggestion[]>([]);
   const [siteSugOpen, setSiteSugOpen] = React.useState(false);
   const siteTimer = React.useRef<number | undefined>(undefined);
+  // Monotonic token: only the latest resolveSite call may write state.
+  const siteSeq = React.useRef(0);
+  // True while the sq ft field holds an auto-applied value; any manual edit
+  // turns auto-apply off so a later resolution can't clobber the user's number.
+  const [sqftAuto, setSqftAuto] = React.useState(true);
   const [siteBusy, setSiteBusy] = React.useState(false);
   const [siteZonePick, setSiteZonePick] = React.useState("");
+  React.useEffect(() => () => window.clearTimeout(siteTimer.current), []);
   const [site, setSite] = React.useState<null | {
     formatted: string; lotSqft?: number; zone?: string; residFar?: number;
     rules: ZoneRules | null; cityInfo: CityZoning | null; source?: string;
@@ -1014,21 +1031,33 @@ function InlineUnderwrite({
   async function resolveSite(addrOverride?: string) {
     const a = (addrOverride ?? siteAddr).trim();
     if (!a) return;
-    setSiteSugOpen(false); setSiteBusy(true); setSite(null); setSiteZonePick("");
+    const seq = ++siteSeq.current;
+    window.clearTimeout(siteTimer.current);
+    setSiteSugs([]); setSiteSugOpen(false); setSiteBusy(true); setSite(null); setSiteZonePick("");
     const geo = await geocodeAddress(GOOGLE_MAPS_KEY, a);
+    if (seq !== siteSeq.current) return;
     if (!geo) { toast.error("Couldn't locate that address — check the spelling."); setSiteBusy(false); return; }
     const key = Object.keys(CITY_ZONING).find(
       (c) => c.toLowerCase() === geo.city.toLowerCase() && CITY_ZONING[c].state === geo.state,
     );
     const cityInfo = key ? CITY_ZONING[key] : null;
     const street = geo.formatted.split(",")[0];
+    // Record lookups need a street-level geocode — a city/neighborhood
+    // centroid would hit some unrelated parcel and report its lot as fact.
+    const streetLevel = /^\d/.test(street);
     let [rawZone, parcel] = await Promise.all([
-      cityInfo?.socrataZoning ? zoneAtAddress(cityInfo.socrataZoning, street) : Promise.resolve(null),
-      parcelAtAddress(geo.city, geo.state, street, geo.lat, geo.lng),
+      cityInfo?.socrataZoning && streetLevel ? zoneAtAddress(cityInfo.socrataZoning, street) : Promise.resolve(null),
+      streetLevel ? parcelAtAddress(geo.city, geo.state, street, geo.lat, geo.lng) : Promise.resolve(null),
     ]);
+    if (seq !== siteSeq.current) return;
     if (!rawZone && parcel?.zone) rawZone = parcel.zone;
-    if (!rawZone && cityInfo?.gisServer) rawZone = await zoneAtPoint(cityInfo.gisServer, geo.lat, geo.lng);
+    if (!rawZone && cityInfo?.gisServer && streetLevel) rawZone = await zoneAtPoint(cityInfo.gisServer, geo.lat, geo.lng);
+    if (seq !== siteSeq.current) return;
     const rules = cityInfo && rawZone ? matchZoneRules(cityInfo, rawZone) : null;
+    // A fresh resolution with no computable envelope must not leave the
+    // previous site's sq ft attached to this address.
+    const freshEnv = parcel?.lotSqft ? envelope(parcel.lotSqft, rules ?? { far: parcel.residFar }) : null;
+    if (!freshEnv?.buildableSqft && sqftAuto) setSqft(buildableSqft);
     setSite({
       formatted: geo.formatted, lotSqft: parcel?.lotSqft, zone: rawZone ?? undefined,
       residFar: parcel?.residFar, rules, cityInfo, source: parcel?.source,
@@ -1042,10 +1071,11 @@ function InlineUnderwrite({
     ? envelope(site.lotSqft, siteRules ?? { far: site.residFar })
     : null;
   const siteBuildable = siteEnv?.buildableSqft ?? null;
-  // The resolved envelope becomes the sq ft being underwritten (still editable).
+  // The resolved envelope becomes the sq ft being underwritten — unless the
+  // user has typed their own number, which always wins.
   React.useEffect(() => {
-    if (siteBuildable) setSqft(siteBuildable);
-  }, [siteBuildable]);
+    if (siteBuildable && sqftAuto) setSqft(siteBuildable);
+  }, [siteBuildable, sqftAuto]);
 
   const arv = Math.round(sale * sqft);
   // Identical engine to the full Deal Analyzer — the two can never disagree.
@@ -1064,7 +1094,7 @@ function InlineUnderwrite({
     return v.endsWith(".0") ? v.slice(0, -2) : v;
   };
   const ready = land > 0 && sale > 0 && sqft > 0;
-  const href = `/deal-analyzer?arv=${arv}&costPerSqft=${bppsf}&totalSqft=${sqft}&landCost=${land}&productType=${encodeURIComponent(type)}&address=${encodeURIComponent(site?.formatted ?? address)}`;
+  const href = `/deal-analyzer?arv=${arv}&costPerSqft=${bppsf}&totalSqft=${sqft}&landCost=${land}&mode=sell&rate=${rate}&months=${months}&ltc=${ltc}&points=${points}&closingPct=${closingPct}&productType=${encodeURIComponent(type)}&address=${encodeURIComponent(site?.formatted ?? address)}`;
 
   return (
     <div className="mt-6 rounded-md border border-gold/40 bg-gold-muted/30 p-4">
@@ -1103,7 +1133,7 @@ function InlineUnderwrite({
             <p className="text-foreground">
               {site.lotSqft
                 ? <>Lot <span className="font-semibold">{fmtNumber(site.lotSqft)} sf</span> ({site.source})</>
-                : <>Lot size not in public records here — use the Zoning button above for manual mode</>}
+                : <>Lot size not in public records here — type your buildable sq ft below</>}
               {site.zone && <> · zone <span className="font-semibold">{site.zone}</span></>}
             </p>
             {site.cityInfo?.zones && !site.rules && (
@@ -1117,15 +1147,17 @@ function InlineUnderwrite({
               </select>
             )}
             {siteBuildable
-              ? <p className="font-medium text-emerald-600">You can build ~{fmtNumber(siteBuildable)} sf{siteEnv?.units ? ` · up to ${siteEnv.units} unit${siteEnv.units === 1 ? "" : "s"}` : ""}{siteRules ? ` (${siteRules.code}, ${siteRules.source})` : ""} — applied below.</p>
+              ? <p className="font-medium text-emerald-600">You can build ~{fmtNumber(siteBuildable)} sf{siteEnv?.units ? ` · up to ${siteEnv.units} unit${siteEnv.units === 1 ? "" : "s"}` : ""}{siteRules ? ` (${siteRules.code}, ${siteRules.source})` : " (from the recorded max residential FAR — verify with the city)"} — {sqftAuto ? "applied below." : "your typed sq ft below is kept."}</p>
               : site.lotSqft && site.cityInfo?.zones && !siteRules
                 ? <p className="text-muted-foreground">Pick the district above to compute buildable sq ft.</p>
-                : null}
+                : siteRules && !site.lotSqft
+                  ? <p className="text-muted-foreground">District set — no recorded lot size here, so type your buildable sq ft below.</p>
+                  : null}
           </div>
         )}
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <NumericField label="Buildable sq ft" value={sqft} onChange={setSqft} />
+        <NumericField label="Buildable sq ft" value={sqft} onChange={(v) => { setSqftAuto(false); setSqft(v); }} />
         <NumericField label="Land price" value={land} onChange={setLand} prefix="$" />
         <NumericField label="Build $/sf" value={bppsf} onChange={setBppsf} prefix="$" />
         <NumericField label="Sell $/sf" value={sale} onChange={setSale} prefix="$" />
