@@ -977,26 +977,141 @@ function InlineUnderwrite({
   city, type, buildableSqft, initialLand, address,
 }: { city: string; type: ProductType; buildableSqft: number; initialLand?: number; address: string }) {
   const [land, setLand] = React.useState(initialLand ?? 0);
+  // Sq ft being underwritten — defaults to this permit's building, replaced by
+  // the zoning envelope of the user's own site, always editable.
+  const [sqft, setSqft] = React.useState(buildableSqft);
   const [bppsf, setBppsf] = React.useState(buildPpsf(city, type));
   const [sale, setSale] = React.useState(0);
   // Blank (0) = use the modeled costs; any entry replaces the model.
   const [finCost, setFinCost] = React.useState(0);
   const [closingCost, setClosingCost] = React.useState(0);
+  // The land the user actually wants to buy: address → parcel + zoning → buildable sf.
+  const [siteAddr, setSiteAddr] = React.useState("");
+  const [siteSugs, setSiteSugs] = React.useState<AddressSuggestion[]>([]);
+  const [siteSugOpen, setSiteSugOpen] = React.useState(false);
+  const siteTimer = React.useRef<number | undefined>(undefined);
+  const [siteBusy, setSiteBusy] = React.useState(false);
+  const [siteZonePick, setSiteZonePick] = React.useState("");
+  const [site, setSite] = React.useState<null | {
+    formatted: string; lotSqft?: number; zone?: string; residFar?: number;
+    rules: ZoneRules | null; cityInfo: CityZoning | null; source?: string;
+  }>(null);
+
+  function onSiteAddr(v: string) {
+    setSiteAddr(v);
+    window.clearTimeout(siteTimer.current);
+    if (v.trim().length < 5) { setSiteSugs([]); setSiteSugOpen(false); return; }
+    siteTimer.current = window.setTimeout(async () => {
+      const s = await suggestAddresses(GOOGLE_MAPS_KEY, v);
+      setSiteSugs(s); setSiteSugOpen(s.length > 0);
+    }, 250);
+  }
+
+  async function resolveSite(addrOverride?: string) {
+    const a = (addrOverride ?? siteAddr).trim();
+    if (!a) return;
+    setSiteSugOpen(false); setSiteBusy(true); setSite(null); setSiteZonePick("");
+    const geo = await geocodeAddress(GOOGLE_MAPS_KEY, a);
+    if (!geo) { toast.error("Couldn't locate that address — check the spelling."); setSiteBusy(false); return; }
+    const key = Object.keys(CITY_ZONING).find(
+      (c) => c.toLowerCase() === geo.city.toLowerCase() && CITY_ZONING[c].state === geo.state,
+    );
+    const cityInfo = key ? CITY_ZONING[key] : null;
+    const street = geo.formatted.split(",")[0];
+    let [rawZone, parcel] = await Promise.all([
+      cityInfo?.socrataZoning ? zoneAtAddress(cityInfo.socrataZoning, street) : Promise.resolve(null),
+      parcelAtAddress(geo.city, geo.state, street, geo.lat, geo.lng),
+    ]);
+    if (!rawZone && parcel?.zone) rawZone = parcel.zone;
+    if (!rawZone && cityInfo?.gisServer) rawZone = await zoneAtPoint(cityInfo.gisServer, geo.lat, geo.lng);
+    const rules = cityInfo && rawZone ? matchZoneRules(cityInfo, rawZone) : null;
+    setSite({
+      formatted: geo.formatted, lotSqft: parcel?.lotSqft, zone: rawZone ?? undefined,
+      residFar: parcel?.residFar, rules, cityInfo, source: parcel?.source,
+    });
+    setSiteBusy(false);
+  }
+
+  const siteRules: ZoneRules | null =
+    site?.rules ?? (site?.cityInfo?.zones?.find((z) => z.code === siteZonePick) ?? null);
+  const siteEnv = site?.lotSqft
+    ? envelope(site.lotSqft, siteRules ?? { far: site.residFar })
+    : null;
+  const siteBuildable = siteEnv?.buildableSqft ?? null;
+  // The resolved envelope becomes the sq ft being underwritten (still editable).
+  React.useEffect(() => {
+    if (siteBuildable) setSqft(siteBuildable);
+  }, [siteBuildable]);
+
   const opp = scoreOpportunity({
-    city, type, buildableSqft, areaPpsf: sale, landPrice: land, buildPpsfOverride: bppsf,
+    city, type, buildableSqft: sqft, areaPpsf: sale, landPrice: land, buildPpsfOverride: bppsf,
     finCostOverride: finCost > 0 ? finCost : undefined,
     closingCostOverride: closingCost > 0 ? closingCost : undefined,
   });
-  const ready = land > 0 && sale > 0;
-  const href = `/deal-analyzer?arv=${opp.arv}&costPerSqft=${bppsf}&totalSqft=${buildableSqft}&landCost=${land}&productType=${encodeURIComponent(type)}&address=${encodeURIComponent(address)}`;
+  const ready = land > 0 && sale > 0 && sqft > 0;
+  const href = `/deal-analyzer?arv=${opp.arv}&costPerSqft=${bppsf}&totalSqft=${sqft}&landCost=${land}&productType=${encodeURIComponent(type)}&address=${encodeURIComponent(site?.formatted ?? address)}`;
 
   return (
     <div className="mt-6 rounded-md border border-gold/40 bg-gold-muted/30 p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="stat-label flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-gold" /> Underwrite it</div>
       </div>
-      <div className="grid grid-cols-3 gap-2">
-        <NumericField label="Land" value={land} onChange={setLand} prefix="$" />
+      <div className="mb-3">
+        <div className="relative">
+          <Input
+            placeholder="Address of the land you want to buy (optional)"
+            value={siteAddr}
+            onChange={(e) => onSiteAddr(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") resolveSite(); }}
+            onBlur={() => window.setTimeout(() => setSiteSugOpen(false), 150)}
+          />
+          {siteSugOpen && (
+            <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-md border border-border bg-card shadow-elevated">
+              {siteSugs.map((s) => (
+                <button
+                  key={s.placeId}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { setSiteAddr(s.description); setSiteSugs([]); setSiteSugOpen(false); resolveSite(s.description); }}
+                  className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
+                >
+                  {s.description}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {siteBusy && <p className="mt-1.5 text-[11px] text-muted-foreground">Checking public parcel + zoning records…</p>}
+        {site && (
+          <div className="mt-2 rounded-md border border-border bg-background p-2.5 text-xs space-y-1.5">
+            <p className="truncate text-muted-foreground">{site.formatted}</p>
+            <p className="text-foreground">
+              {site.lotSqft
+                ? <>Lot <span className="font-semibold">{fmtNumber(site.lotSqft)} sf</span> ({site.source})</>
+                : <>Lot size not in public records here — use the Zoning button above for manual mode</>}
+              {site.zone && <> · zone <span className="font-semibold">{site.zone}</span></>}
+            </p>
+            {site.cityInfo?.zones && !site.rules && (
+              <select
+                value={siteZonePick}
+                onChange={(e) => setSiteZonePick(e.target.value)}
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+              >
+                <option value="">Pick the district (see the city's zoning map)…</option>
+                {site.cityInfo.zones.map((z) => <option key={z.code} value={z.code}>{z.code} — {z.name}</option>)}
+              </select>
+            )}
+            {siteBuildable
+              ? <p className="font-medium text-emerald-600">You can build ~{fmtNumber(siteBuildable)} sf{siteEnv?.units ? ` · up to ${siteEnv.units} unit${siteEnv.units === 1 ? "" : "s"}` : ""}{siteRules ? ` (${siteRules.code}, ${siteRules.source})` : ""} — applied below.</p>
+              : site.lotSqft && site.cityInfo?.zones && !siteRules
+                ? <p className="text-muted-foreground">Pick the district above to compute buildable sq ft.</p>
+                : null}
+          </div>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <NumericField label="Buildable sq ft" value={sqft} onChange={setSqft} />
+        <NumericField label="Land price" value={land} onChange={setLand} prefix="$" />
         <NumericField label="Build $/sf" value={bppsf} onChange={setBppsf} prefix="$" />
         <NumericField label="Sell $/sf" value={sale} onChange={setSale} prefix="$" />
       </div>
@@ -1005,7 +1120,7 @@ function InlineUnderwrite({
         <NumericField label="Closing costs" value={closingCost} onChange={setClosingCost} prefix="$" />
       </div>
       {!ready && (
-        <p className="mt-3 text-xs text-muted-foreground">Enter your land price and sell $/sf to underwrite this deal.</p>
+        <p className="mt-3 text-xs text-muted-foreground">Enter your land price and sell $/sf to underwrite this deal{sqft <= 0 ? " (and the sq ft you plan to build)" : ""}.</p>
       )}
       {ready && (
       <div className="mt-3 space-y-1">
