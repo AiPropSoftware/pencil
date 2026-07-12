@@ -43,6 +43,8 @@ export interface CityZoning {
   socrataZoning?: string;
   /** ArcGIS server root that hosts the zoning polygons (layer self-discovered). */
   gisServer?: string;
+  /** Socrata geodataset with zoning polygons — point-in-polygon lookup. */
+  socrataZoningGeo?: { url: string; field: string };
   /** Link to the official code for verification / manual mode. */
   codeUrl: string;
   codeName: string;
@@ -103,6 +105,8 @@ export const CITY_ZONING: Record<string, CityZoning> = {
   },
   Chicago: {
     state: "IL",
+    // City open-data zoning polygons ("Boundaries - Zoning Districts current").
+    socrataZoningGeo: { url: "https://data.cityofchicago.org/resource/7cve-jgbp.json", field: "zone_class" },
     codeUrl: "https://secondcityzoning.org/zoning_rules/",
     codeName: "Chicago Zoning Ordinance § 17-2 (residential district tables)",
     zones: [
@@ -124,6 +128,8 @@ export const CITY_ZONING: Record<string, CityZoning> = {
   },
   Dallas: {
     state: "TX",
+    // City GIS zoning service (base-zoning layer self-discovered).
+    gisServer: "https://gis.dallascityhall.com/wwwgis/rest/services/Sdc_public/Zoning/MapServer",
     codeUrl: "https://codelibrary.amlegal.com/codes/dallas/latest/dallas_tx/0-0-0-28247",
     codeName: "Dallas Development Code ch. 51A (§ 51A-4.110 residential districts)",
     zones: [
@@ -198,6 +204,8 @@ export const CITY_ZONING: Record<string, CityZoning> = {
   },
   "Fort Worth": {
     state: "TX",
+    // City GIS zoning layer (field ZONING, e.g. "A-5").
+    gisServer: "https://mapit.fortworthtexas.gov/ags/rest/services/CIVIC/CIVIC_ZONING/MapServer",
     codeUrl: "https://codelibrary.amlegal.com/codes/ftworth/latest/ftworth_tx/0-0-0-34983",
     codeName: "Fort Worth Zoning Ordinance ch. 4 (§§ 4.701–4.713)",
     zones: [
@@ -268,6 +276,8 @@ export const CITY_ZONING: Record<string, CityZoning> = {
   },
   "Los Angeles": {
     state: "CA",
+    // LA GeoHub zoning FeatureServer (field ZONE_CMPLT, e.g. "R1-1").
+    gisServer: "https://services5.arcgis.com/7nsPwEMP38bSkCjy/arcgis/rest/services/Zoning/FeatureServer",
     codeUrl: "https://planning.lacity.gov/odocument/eadcb225-a16b-4ce6-bc94-c915408c2b04/Zoning_Code_Summary.pdf",
     codeName: "LAMC Ch. 1 Art. 2 (DCP CP-7150 zoning summary, rev. Jan 2026)",
     zones: [
@@ -329,6 +339,8 @@ export const CITY_ZONING: Record<string, CityZoning> = {
   },
   Phoenix: {
     state: "AZ",
+    // Official Phoenix zoning MapServer (district code field ZONING).
+    gisServer: "https://maps.phoenix.gov/pub/rest/services/Public/Zoning/MapServer",
     codeUrl: "https://phoenix.municipal.codes/ZO",
     codeName: "Phoenix Zoning Ordinance ch. 6 (as amended by Ord. G-7446, Jan 2026)",
     zones: [
@@ -500,6 +512,8 @@ export const CITY_ZONING: Record<string, CityZoning> = {
   },
   Seattle: {
     state: "WA",
+    // Seattle GeoData hosted zoning (field ZONING, e.g. "NR3", "LR2").
+    gisServer: "https://services.arcgis.com/ZOyb2t4B0UYuYNYH/arcgis/rest/services/Current_Land_Use_Zoning_Detail_2/FeatureServer",
     codeUrl: "https://www.seattle.gov/sdci/codes/codes-we-enforce-(a-z)/neighborhood-residential-code",
     codeName: "SMC Title 23 — NR zone standards per Ordinance 127376 (effective Jan 21, 2026)",
     zones: (() => {
@@ -526,6 +540,8 @@ export const CITY_ZONING: Record<string, CityZoning> = {
   },
   Denver: {
     state: "CO",
+    // Official Denver zoning MapServer (field ZONE_DISTRICT, e.g. "U-SU-C").
+    gisServer: "https://denvergov.org/maps/data/Zoning/MapServer",
     codeUrl: "https://www.denvergov.org/Government/Agencies-Departments-Offices/Agencies-Departments-Offices-Directory/Community-Planning-and-Development/Denver-Zoning-Code",
     codeName: "Denver Zoning Code (form-based, Articles 3–6)",
     zones: [
@@ -655,10 +671,17 @@ export async function zoneAtPoint(gisServer: string, lat: number, lng: number): 
  * a district code. Returns null rather than guess.
  */
 function pickZoneValue(rec: Record<string, unknown>): string | null {
+  const ok = (v: unknown): v is string =>
+    typeof v === "string" && v.trim().length > 0 && v.trim().length <= 20 && !/\d{4}/.test(v);
+  // Pass 1: exact district-code fields used by the wired city servers.
+  for (const [k, v] of Object.entries(rec)) {
+    if (/^(zone_?district|zone_?class|zone_?cmplt|zoning_?ztype|zoning|ztype|transect)$/i.test(k) && ok(v)) return v.trim();
+  }
+  // Pass 2: conservative generic probe.
   for (const [k, v] of Object.entries(rec)) {
     if (!/^(zoning|zone|ztype|base_?zone|zone_?class|district|transect)/i.test(k)) continue;
-    if (/case|ordinance|date|_id$|url|link|desc/i.test(k)) continue;
-    if (typeof v === "string" && v.trim() && v.trim().length <= 20 && !/\d{4}/.test(v)) return v.trim();
+    if (/case|ordinance|date|_id$|url|link|desc|group|use_form/i.test(k)) continue;
+    if (ok(v)) return v.trim();
   }
   return null;
 }
@@ -692,6 +715,21 @@ export async function zoneAtAddress(datasetUrl: string, streetAddress: string): 
       if (zone) return zone;
     }
     return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Zoning district at a point from a Socrata geodataset (explicit field —
+ * a portal-side rename degrades to null, never a wrong answer). */
+export async function zoneAtPointSocrata(url: string, field: string, lat: number, lng: number): Promise<string | null> {
+  try {
+    const q = `${url}?$select=${encodeURIComponent(field)}&$where=${encodeURIComponent(`intersects(the_geom,'POINT(${lng} ${lat})')`)}&$limit=1`;
+    const res = await fetch(q, { headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    const rows = (await res.json()) as Record<string, unknown>[];
+    const v = Array.isArray(rows) ? rows[0]?.[field] : null;
+    return typeof v === "string" && v.trim() ? v.trim().toUpperCase() : null;
   } catch {
     return null;
   }

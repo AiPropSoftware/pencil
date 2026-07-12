@@ -18,7 +18,7 @@ import { setLiveSaleRates } from "@/lib/underwrite/liveSaleRates";
 import { fetchMlsListings } from "@/providers/listings/mls";
 import { discoverCityPermits } from "@/providers/permits/discovery";
 import { geocodeVerify, geocodeAddress, suggestAddresses, type AddressSuggestion } from "@/lib/googleMaps";
-import { CITY_ZONING, zoneAtPoint, zoneAtAddress, parcelAtAddress, matchZoneRules, envelope, type CityZoning, type ZoneRules, type ParcelInfo } from "@/lib/zoning/zoning";
+import { CITY_ZONING, zoneAtPoint, zoneAtPointSocrata, zoneAtAddress, parcelAtAddress, matchZoneRules, envelope, type CityZoning, type ZoneRules, type ParcelInfo } from "@/lib/zoning/zoning";
 import { GoogleMapView } from "@/components/GoogleMapView";
 
 // Heavy libraries load on demand, never on first paint: Leaflet only when the
@@ -704,6 +704,7 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
     ]);
     if (seq !== checkSeq.current) return;
     if (!rawZone && parcel?.zone) rawZone = parcel.zone;
+    if (!rawZone && cityInfo?.socrataZoningGeo && streetLevel) rawZone = await zoneAtPointSocrata(cityInfo.socrataZoningGeo.url, cityInfo.socrataZoningGeo.field, geo.lat, geo.lng);
     if (!rawZone && cityInfo?.gisServer && streetLevel) rawZone = await zoneAtPoint(cityInfo.gisServer, geo.lat, geo.lng);
     if (seq !== checkSeq.current) return;
     const rules = cityInfo && rawZone ? matchZoneRules(cityInfo, rawZone) : null;
@@ -1047,6 +1048,7 @@ function InlineUnderwrite({
     ]);
     if (seq !== siteSeq.current) return;
     if (!rawZone && parcel?.zone) rawZone = parcel.zone;
+    if (!rawZone && cityInfo?.socrataZoningGeo && streetLevel) rawZone = await zoneAtPointSocrata(cityInfo.socrataZoningGeo.url, cityInfo.socrataZoningGeo.field, geo.lat, geo.lng);
     if (!rawZone && cityInfo?.gisServer && streetLevel) rawZone = await zoneAtPoint(cityInfo.gisServer, geo.lat, geo.lng);
     if (seq !== siteSeq.current) return;
     const rules = cityInfo && rawZone ? matchZoneRules(cityInfo, rawZone) : null;
