@@ -17,6 +17,7 @@ const SignUp = React.lazy(() => import("@/pages/SignUp"));
 const Admin = React.lazy(() => import("@/pages/Admin"));
 const BillingSuccess = React.lazy(() => import("@/pages/BillingSuccess"));
 const NotFound = React.lazy(() => import("@/pages/NotFound"));
+const Library = React.lazy(() => import("@/pages/Library"));
 
 const PageFallback = () => (
   <div className="grid min-h-[50vh] place-items-center text-sm text-muted-foreground animate-pulse">Loading…</div>
@@ -37,6 +38,7 @@ export default function App() {
 
           {/* Drill-downs (reached from the map, not from any menu). */}
           <Route path="/deal-analyzer" element={<DealAnalyzer />} />
+          <Route path="/library" element={<Library />} />
           <Route path="/sign-in" element={<SignIn />} />
           <Route path="/sign-up" element={<SignUp />} />
           <Route path="/billing/success" element={<BillingSuccess />} />

@@ -80,6 +80,10 @@ export default function DealAnalyzer() {
     setInputs((p) => ({ ...p, refiEnabled: s === "rent", applySellingCosts: s === "sell" }));
   };
 
+  // Sell mode prices the exit in $/sf; the sale price (ARV) is derived.
+  const [salePpsf, setSalePpsf] = React.useState<number | null>(null);
+  const salePpsfEff = salePpsf ?? (inputs.totalSqft > 0 ? inputs.arv / inputs.totalSqft : 0);
+
   const r = React.useMemo(() => calcDeal(inputs), [inputs]);
   const set = <K extends keyof DealInputs>(k: K, v: DealInputs[K]) =>
     setInputs((p) => ({ ...p, [k]: v }));
@@ -181,13 +185,32 @@ export default function DealAnalyzer() {
                 <div className="grid sm:grid-cols-2 gap-4">
                   <NumericField label="Land cost" value={inputs.landCost} onChange={(v) => set("landCost", v)} prefix="$" />
                   <NumericField label="Cost / sqft" value={inputs.costPerSqft} onChange={(v) => set("costPerSqft", v)} prefix="$" />
-                  <NumericField label="Total sqft" value={inputs.totalSqft} onChange={(v) => set("totalSqft", v)} suffix="sf" />
+                  <NumericField
+                    label="Total sqft"
+                    value={inputs.totalSqft}
+                    onChange={(v) => {
+                      if (strategy === "sell" && salePpsfEff > 0) setInputs((p) => ({ ...p, totalSqft: v, arv: Math.round(salePpsfEff * v) }));
+                      else set("totalSqft", v);
+                    }}
+                    suffix="sf"
+                  />
                   <NumericField label="Closing costs" value={inputs.closingCostsPct} onChange={(v) => set("closingCostsPct", v)} suffix="%" percent />
                   <NumericField label="Lender fees" value={inputs.lenderFeesPct} onChange={(v) => set("lenderFeesPct", v)} suffix="%" percent />
                   <NumericField label="Construction rate" value={inputs.constructionRate} onChange={(v) => set("constructionRate", v)} suffix="%" percent />
                   <NumericField label="Months to build" value={inputs.monthsToBuild} onChange={(v) => set("monthsToBuild", v)} suffix="mo" />
                   <NumericField label="LTC" value={inputs.ltcPct} onChange={(v) => set("ltcPct", v)} suffix="%" percent />
-                  <NumericField label={strategy === "sell" ? "Sale price (ARV)" : "ARV (after-repair value)"} value={inputs.arv} onChange={(v) => set("arv", v)} prefix="$" className="sm:col-span-2" />
+                  {strategy === "sell" ? (
+                    <NumericField
+                      label="Sale $/sf"
+                      value={salePpsfEff}
+                      onChange={(v) => { setSalePpsf(v); setInputs((p) => ({ ...p, arv: Math.round(v * p.totalSqft) })); }}
+                      prefix="$"
+                      className="sm:col-span-2"
+                      hint={`= ${fmtMoney(inputs.arv)} sale price at ${inputs.totalSqft.toLocaleString("en-US")} sf`}
+                    />
+                  ) : (
+                    <NumericField label="ARV (after-repair value)" value={inputs.arv} onChange={(v) => set("arv", v)} prefix="$" className="sm:col-span-2" />
+                  )}
                 </div>
                 {strategy === "sell" && (
                   <div className="grid sm:grid-cols-2 gap-4 rounded-md border border-border bg-secondary/30 p-4">
@@ -411,7 +434,7 @@ function AINotesButton({ inputs, results }: { inputs: DealInputs; results: DealR
     } catch (e) {
       console.error(e);
       setSummary(localSummary(inputs, results));
-      toast.message("Used local summary (AI gateway not configured).");
+      toast.message("Drafted locally — connect the AI gateway for Claude-written notes.");
     } finally {
       setLoading(false);
     }
@@ -458,18 +481,56 @@ function DialogFooter({ children }: { children: React.ReactNode }) {
   return <div className="mt-2 flex items-center justify-end gap-2">{children}</div>;
 }
 
+/**
+ * A memo the user can paste straight into an email to a capital partner —
+ * written prose, only the sections that apply to the chosen strategy.
+ */
 function localSummary(d: DealInputs, r: DealResults): string {
-  return [
-    `${d.address || "Untitled deal"} · ${d.totalSqft.toLocaleString()} sf ground-up.`,
+  const sqft = d.totalSqft.toLocaleString("en-US");
+  const ppsfSale = d.totalSqft > 0 ? Math.round(d.arv / d.totalSqft) : 0;
+  const financingCosts = r.lenderFees + r.totalCarry;
+  const returnOnCash = r.cashRequired > 0 ? r.projectedProfit / r.cashRequired : 0;
+  const today = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const sell = d.applySellingCosts;
+
+  const parts: string[] = [
+    `DEAL MEMO — ${d.address || "Untitled project"}`,
+    `Prepared ${today}`,
     "",
-    `All-in cost: ${fmtMoney(r.allInCost)} against ARV of ${fmtMoney(d.arv)}.`,
-    `Projected profit ${fmtMoney(r.projectedProfit)} (${fmtPct(r.profitMargin)} margin).`,
-    d.refiEnabled
-      ? `Refi at ${fmtPct(d.refiLtvPct)} LTV pulls ${fmtMoney(r.netCashAtRefi)} back, leaving ${fmtMoney(r.cashLeftInDeal)} in the deal. Cash-on-cash ${fmtPct(r.cashOnCash)}, DSCR ${fmtRatio(r.dscr)}.`
-      : `No refi modeled. Cash basis ${fmtMoney(r.cashRequired)}.`,
-    `Rental: ${fmtMoney(r.noi)} NOI on ${fmtMoney(r.grossRent)} gross at ${fmtPct(d.vacancyPct)} vacancy — cap rate ${fmtPct(r.capRate)}.`,
-    d.partnerEnabled
-      ? `Partner structure: sponsor takes ${fmtPct(d.sponsorEquityPct)} of profit (${fmtMoney(r.sponsorProfitShare)}).`
-      : "",
-  ].filter(Boolean).join("\n");
+    "THE PROJECT",
+    `${d.address || "The site"} is a proposed ${sqft} sf ground-up build. Total development cost is projected at ${fmtMoney(r.allInCost)}: ${fmtMoney(d.landCost)} for the land, ${fmtMoney(r.hardConstruction)} of hard construction (${fmtMoney(d.costPerSqft)}/sf), ${fmtMoney(r.closingCosts)} in closing costs, and ${fmtMoney(financingCosts)} of financing costs across a ${d.monthsToBuild}-month build.`,
+    "",
+    "CAPITAL PLAN",
+    `The budget supports a ${fmtPct(d.ltcPct)} loan-to-cost construction loan of ${fmtMoney(r.constructionLoan)} at ${fmtPct(d.constructionRate)} interest-only (${fmtMoney(r.lenderFees)} in points, average carry ${fmtMoney(r.monthlyCarry)}/month). Sponsor cash required to close and carry the project is ${fmtMoney(r.cashRequired)}.`,
+  ];
+
+  if (sell) {
+    parts.push(
+      "",
+      "THE EXIT",
+      `On completion the project is projected to sell for ${fmtMoney(d.arv)} (${fmtMoney(ppsfSale)}/sf). Net of ${fmtPct(d.salesCommissionPct + d.saleClosingPct)} selling costs (${fmtMoney(r.sellingCosts)}), proceeds of ${fmtMoney(r.netSaleProceeds)} return a projected profit of ${fmtMoney(r.projectedProfit)} — a ${fmtPct(r.profitMargin)} margin on cost and a ${fmtPct(returnOnCash)} return on invested cash over the build period.`,
+    );
+  }
+  if (d.refiEnabled) {
+    parts.push(
+      "",
+      "THE REFINANCE & HOLD",
+      `On completion the asset appraises at ${fmtMoney(d.arv)}. A ${fmtPct(d.refiLtvPct)} LTV refinance (${fmtMoney(r.refiLoan)}) retires the construction loan and returns ${fmtMoney(Math.max(0, r.netCashAtRefi))} to the sponsor, leaving ${fmtMoney(r.cashLeftInDeal)} in the deal. Stabilized, the property produces ${fmtMoney(r.noi)} of NOI on ${fmtMoney(r.grossRent)} gross scheduled rent (${fmtPct(d.vacancyPct)} vacancy) — a ${fmtPct(r.capRate)} cap rate, ${fmtRatio(r.dscr)} DSCR, and ${fmtPct(r.cashOnCash)} cash-on-cash on the equity remaining.`,
+    );
+  }
+  if (d.partnerEnabled) {
+    parts.push(
+      "",
+      "PARTNERSHIP ECONOMICS",
+      `Profit is split ${fmtPct(d.sponsorEquityPct)} to the sponsor (${fmtMoney(r.sponsorProfitShare)}) and ${fmtPct(1 - d.sponsorEquityPct)} to the investor (${fmtMoney(r.investorProfitShare)}).`,
+    );
+  }
+  parts.push(
+    "",
+    "AT A GLANCE",
+    `Land ${fmtMoney(d.landCost)} · Build ${fmtMoney(d.costPerSqft)}/sf × ${sqft} sf · All-in ${fmtMoney(r.allInCost)}${sell ? ` · Exit ${fmtMoney(d.arv)}` : ""} · Cash required ${fmtMoney(r.cashRequired)} · Projected profit ${fmtMoney(r.projectedProfit)} (${fmtPct(r.profitMargin)})`,
+    "",
+    "Figures are projections from the sponsor's inputs and current market-standard financing assumptions; they are not guarantees. Verify construction pricing with GC bids and confirm loan terms with your lender before committing capital.",
+  );
+  return parts.join("\n");
 }

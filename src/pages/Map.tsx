@@ -484,10 +484,6 @@ export default function MapPage() {
           watched={watched.has(selected.data.id)}
           onWatch={() => toggleWatch(selected.data.id)}
           onClose={() => select(null)}
-          onCheckZoning={() => setZoning({
-            address: /\d/.test(selected.data.name) ? `${selected.data.name}, ${selected.data.city}, ${selected.data.state}` : "",
-            lotSqft: selected.data.sqftEstimated ? undefined : selected.data.landSqft,
-          })}
         />
       )}
       {zoning && <ZoningPanel init={zoning} onClose={() => setZoning(null)} />}
@@ -1314,7 +1310,7 @@ function ShareWatchRow({ id, watched, onWatch }: { id: string; watched: boolean;
   );
 }
 
-function DevelopmentPanel({ dev, watched, onWatch, onClose, onCheckZoning }: { dev: Development; watched: boolean; onWatch: () => void; onClose: () => void; onCheckZoning: () => void }) {
+function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development; watched: boolean; onWatch: () => void; onClose: () => void }) {
   const hasContractor = dev.developer && dev.developer !== "Permit holder on file";
   const builderHref = hasContractor
     ? `https://www.google.com/search?q=${encodeURIComponent(`${dev.developer} ${dev.city} ${dev.state} home builder`)}`
@@ -1345,13 +1341,6 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose, onCheckZoning }: { d
         <ShareWatchRow id={dev.id} watched={watched} onWatch={onWatch} />
 
         <StreetWalk lat={dev.lat} lng={dev.lng} />
-
-        <button
-          onClick={onCheckZoning}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-md border border-gold/40 bg-gold-muted/30 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-gold-muted/60"
-        >
-          <ScrollText className="h-4 w-4 text-gold" /> What can be built here? — check zoning
-        </button>
 
         <div className="mt-6 grid grid-cols-2 gap-3">
           <Metric icon={Building2} label="Units" value={fmtNumber(dev.units)} />

@@ -404,6 +404,8 @@ export const CITY_ZONING: Record<string, CityZoning> = {
   },
   "Miami Beach": {
     state: "FL",
+    // City GIS REST root — the zoning service is self-discovered from it.
+    gisServer: "https://gis.miamibeachfl.gov/public/rest/services",
     codeUrl: "https://library.municode.com/fl/miami_beach/codes/resiliency_code_(current_land_development_regulations)",
     codeName: "Miami Beach Resiliency Code Ch. 7 (eff. June 2023; formerly Ch. 142)",
     zones: (() => {
@@ -441,6 +443,8 @@ export const CITY_ZONING: Record<string, CityZoning> = {
   },
   Miami: {
     state: "FL",
+    // Official Miami 21 transect polygons ("Primary Zoning - Miami 21").
+    gisServer: "https://gis.miami.gov/gis/rest/services/Zoning/ZoningMiami21/MapServer",
     codeUrl: "https://www.miami.gov/Planning-Zoning-Land-Use/View-City-of-Miami-Zoning-Code-Miami-21",
     codeName: "Miami 21 form-based code (Art. 4 Table 2 + Art. 5)",
     zones: [
@@ -578,30 +582,69 @@ async function getJson(url: string): Promise<Record<string, unknown>> {
 }
 
 export async function zoneAtPoint(gisServer: string, lat: number, lng: number): Promise<string | null> {
+  const diag = (msg: string, extra?: unknown) => {
+    // eslint-disable-next-line no-console
+    console.info("[Pencil] zone lookup:", msg, extra ?? "");
+  };
   try {
-    const meta = (await getJson(`${gisServer}?f=json`)) as { layers?: { id: number; name: string }[] };
-    // Exact "Zoning" layer first, then a conservative name match. Never fall
-    // back to an arbitrary layer — a wrong layer means a wrong answer.
-    const layer =
-      meta.layers?.find((l) => l.name.trim().toLowerCase() === "zoning") ??
-      meta.layers?.find((l) => /zoning(?!.*(case|pending|overlay|historic|profile))/i.test(l.name));
-    if (!layer) return null;
-    const q = new URLSearchParams({
-      geometry: `${lng},${lat}`,
-      geometryType: "esriGeometryPoint",
-      inSR: "4326",
-      spatialRel: "esriSpatialRelIntersects",
-      outFields: "*",
-      returnGeometry: "false",
-      f: "json",
-    });
-    const data = (await getJson(`${gisServer}/${layer.id}/query?${q}`)) as {
-      features?: { attributes?: Record<string, unknown> }[];
-    };
-    const attrs = data.features?.[0]?.attributes;
-    if (!attrs) return null;
-    return pickZoneValue(attrs);
-  } catch {
+    // Accept either a service URL (…/MapServer) or a REST root to discover from.
+    const services: string[] = [];
+    if (/\/(Map|Feature)Server\/?$/.test(gisServer)) {
+      services.push(gisServer.replace(/\/$/, ""));
+    } else {
+      const root = (await getJson(`${gisServer}?f=json`)) as {
+        folders?: string[];
+        services?: { name: string; type: string }[];
+      };
+      const zonish = (n: string) => /zon/i.test(n) && !/case|pending|historic/i.test(n);
+      services.push(
+        ...(root.services ?? []).filter((x) => zonish(x.name) && /Server$/.test(x.type)).slice(0, 3)
+          .map((x) => `${gisServer}/${x.name}/${x.type}`),
+      );
+      for (const f of (root.folders ?? []).filter((x) => /zon|plan|gc|mb/i.test(x)).slice(0, 3)) {
+        try {
+          const sub = (await getJson(`${gisServer}/${f}?f=json`)) as { services?: { name: string; type: string }[] };
+          services.push(
+            ...(sub.services ?? []).filter((x) => zonish(x.name) && /Server$/.test(x.type)).slice(0, 2)
+              .map((x) => `${gisServer}/${x.name}/${x.type}`),
+          );
+        } catch { /* skip folder */ }
+      }
+      if (!services.length) { diag("no zoning-named service under", gisServer); return null; }
+    }
+    for (const svcUrl of services.slice(0, 4)) {
+      try {
+        const meta = (await getJson(`${svcUrl}?f=json`)) as { layers?: { id: number; name: string }[] };
+        // Exact "Zoning" layer first, then a conservative name match. Never fall
+        // back to an arbitrary layer — a wrong layer means a wrong answer.
+        const layer =
+          meta.layers?.find((l) => l.name.trim().toLowerCase() === "zoning") ??
+          meta.layers?.find((l) => /zoning(?!.*(case|pending|overlay|historic|profile))/i.test(l.name));
+        if (!layer) { diag("no zoning layer in", svcUrl); continue; }
+        const q = new URLSearchParams({
+          geometry: `${lng},${lat}`,
+          geometryType: "esriGeometryPoint",
+          inSR: "4326",
+          spatialRel: "esriSpatialRelIntersects",
+          outFields: "*",
+          returnGeometry: "false",
+          f: "json",
+        });
+        const data = (await getJson(`${svcUrl}/${layer.id}/query?${q}`)) as {
+          features?: { attributes?: Record<string, unknown> }[];
+        };
+        const attrs = data.features?.[0]?.attributes;
+        if (!attrs) { diag(`no district at point (layer "${layer.name}")`, svcUrl); continue; }
+        const zone = pickZoneValue(attrs);
+        diag("hit", { service: svcUrl, layer: layer.name, zone });
+        if (zone) return zone;
+      } catch (e) {
+        diag(`service failed: ${(e as Error).message}`, svcUrl);
+      }
+    }
+    return null;
+  } catch (e) {
+    diag(`lookup failed: ${(e as Error).message}`);
     return null;
   }
 }
@@ -613,7 +656,7 @@ export async function zoneAtPoint(gisServer: string, lat: number, lng: number): 
  */
 function pickZoneValue(rec: Record<string, unknown>): string | null {
   for (const [k, v] of Object.entries(rec)) {
-    if (!/^(zoning|zone|ztype|base_?zone|zone_?class|district)/i.test(k)) continue;
+    if (!/^(zoning|zone|ztype|base_?zone|zone_?class|district|transect)/i.test(k)) continue;
     if (/case|ordinance|date|_id$|url|link|desc/i.test(k)) continue;
     if (typeof v === "string" && v.trim() && v.trim().length <= 20 && !/\d{4}/.test(v)) return v.trim();
   }
