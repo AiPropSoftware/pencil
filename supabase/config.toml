@@ -1,0 +1,28 @@
+project_id = "pencil"
+
+[functions.deal-summary]
+verify_jwt = true
+
+[functions.comps-search]
+verify_jwt = true
+
+[functions.permits-search]
+verify_jwt = true
+
+[functions.geocode]
+verify_jwt = true
+
+[functions.builder-search]
+verify_jwt = true
+
+[functions.stripe-checkout]
+verify_jwt = true
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.listings-mls]
+verify_jwt = true
+
+[functions.penny-chat]
+verify_jwt = true
