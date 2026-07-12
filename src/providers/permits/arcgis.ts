@@ -31,6 +31,10 @@ export const ARCGIS_SOURCES: ArcgisCitySource[] = [
     city: "Miami",
     state: "FL",
     candidates: [
+      // City of Miami "Building Permits Since 2014" — carries the contractor
+      // (CompanyName), PermitNumber, IssuedDate, TotalSQFT straight from the
+      // city's permitting system. County roots stay as fallback discovery.
+      "https://services6.arcgis.com/ONZht79c8QWuX759/arcgis/rest/services/Building_Permits/FeatureServer/0",
       "https://gisweb.miamidade.gov/arcgis", // confirmed reachable — discover its permit services
       "https://gis.miamidade.gov/arcgis",
     ],
@@ -278,7 +282,7 @@ function normalize(src: ArcgisCitySource, data: ArcgisResponse): { items: Develo
     // geocoded to a block/zip centroid, not the parcel — drop, don't mislead.
     if (tooCoarse(coords.lat) && tooCoarse(coords.lng)) continue;
 
-    const blob = textBlob(attrs, /type|class|desc|work|use|scope|category|name|status/i);
+    const blob = textBlob(attrs, /type|class|desc|work|use|scope|category|status/i);
     const isResidential = /resid|family|duplex|town|apartment|condo|dwelling|sfr/i.test(blob);
     const isNew = /new construction|new building|new dwelling|\bnew\b/i.test(blob);
     const isRemodel = /remodel|repair|addition|alteration|demo|interior|reroof|roof|mechanic|electric|plumb|hvac|pool|fence|sign|solar|shutter|awning|revision/i.test(blob);

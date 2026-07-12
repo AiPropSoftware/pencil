@@ -1314,6 +1314,10 @@ function ShareWatchRow({ id, watched, onWatch }: { id: string; watched: boolean;
 
 function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development; watched: boolean; onWatch: () => void; onClose: () => void }) {
   const hasContractor = dev.developer && dev.developer !== "Permit holder on file";
+  // Live ids embed the city permit number: live-<city>-<permitId>. The
+  // lat/lng fallback key contains a comma — that's not a permit number.
+  const livePermitId = dev.id.startsWith("live-") ? dev.id.replace(/^live-[a-z]+-/i, "") : "";
+  const permitNo = livePermitId && !livePermitId.includes(",") ? livePermitId : "";
   const builderHref = hasContractor
     ? `https://www.google.com/search?q=${encodeURIComponent(`${dev.developer} ${dev.city} ${dev.state} home builder`)}`
     : govLinksFor(dev.city, dev.state).permits;
@@ -1355,16 +1359,23 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
 
         <FundingSection city={dev.city} state={dev.state} />
 
-        <Section title="Project team" tag="permit record">
+        <Section title="Project team" tag={hasContractor ? "verified · city permit record" : "permit record"}>
           <div className="flex items-center justify-between text-sm py-1">
             <span className="text-muted-foreground inline-flex items-center gap-1.5"><HardHat className="h-3.5 w-3.5" /> Developer / GC</span>
             <a href={builderHref} target="_blank" rel="noreferrer" className="font-medium text-gold hover:underline inline-flex items-center gap-1">
               {hasContractor ? dev.developer : "Look up on the city permit portal"} <Globe className="h-3 w-3" />
             </a>
           </div>
+          {!hasContractor && (
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              This city's open dataset doesn't publish the contractor on this record — the permit portal
+              shows the holder of record{permitNo ? ` for permit ${permitNo}` : ""}.
+            </p>
+          )}
         </Section>
 
         <Section title="Permit record" tag="public record">
+          {permitNo && <Row label="Permit #" value={permitNo} />}
           <Row label="Status" value={dev.status} />
           <Row label={<span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" /> Issued</span>} value={dev.approvedDate} />
         </Section>
