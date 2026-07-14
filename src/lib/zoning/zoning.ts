@@ -782,6 +782,14 @@ const PARCEL_SOURCES: ParcelSource[] = [
     source: "Cook County Assessor parcel records",
   },
   {
+    // Texas statewide land parcels — TxGIO StratMap, aggregated annually from
+    // 245+ county appraisal districts. Area arrives in acres (GIS_AREA).
+    match: (_c, s) => s === "TX",
+    kind: "arcgis",
+    url: "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap25_land_parcels_48/MapServer",
+    source: "Texas StratMap parcel records (county appraisal districts)",
+  },
+  {
     // Miami-Dade County GIS parcels — covers every municipality in the county
     // (Miami, Miami Beach, Coral Gables, Hialeah, …). Same server Pencil's
     // live Miami permit discovery already uses from the browser.
@@ -852,6 +860,15 @@ async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number):
           if (/^(lot_?size|land_?(sq_?ft|sqft|area|size)|parcel_?(area|size))/i.test(k) && !/val|price|tax|assess|bldg|building|year|code|flag/i.test(k)) {
             const n = saneLot(num(v));
             if (n) { lotSqft = n; break; }
+          }
+        }
+        // Appraisal-district schemas (e.g. Texas StratMap) record area in ACRES.
+        if (lotSqft == null) {
+          for (const [k, v] of Object.entries(feat.attributes)) {
+            if (/^(gis_?area|lgl_?area|legal_?area|acres?|.*_acres?)$/i.test(k)) {
+              const n = num(v);
+              if (n != null && n >= 0.005 && n <= 50) { lotSqft = saneLot(n * 43560); if (lotSqft) break; }
+            }
           }
         }
         // No recorded lot-size attribute → measure the parcel polygon itself
