@@ -97,7 +97,7 @@ export default function MapPage() {
   const [fly, setFly] = React.useState<{ lat: number; lng: number } | null>(null);
   const [basemap, setBasemap] = React.useState<"streets" | "satellite" | "google">("google");
 
-  const [zoning, setZoning] = React.useState<null | { address: string; lotSqft?: number }>(null);
+  const [zoning, setZoning] = React.useState<null | { address: string; lotSqft?: number; autoRun?: boolean }>(null);
 
   // Watchlist — hearts persist across visits.
   const { ids: watched, toggle: toggleWatch } = useWatchlist();
@@ -216,6 +216,19 @@ export default function MapPage() {
 
   const matchesPlace = (s: string) => place.trim() === "" || s.toLowerCase().includes(place.trim().toLowerCase());
 
+  // A query that starts with a house number is an address, not a city filter:
+  // fly there, re-scope the rail to its city, and X-ray the parcel.
+  const addressShaped = /^\s*\d+[\w'-]*\s+\S+/.test(place);
+  async function searchAddress() {
+    const q = place.trim();
+    if (!q) return;
+    const geo = await geocodeAddress(GOOGLE_MAPS_KEY, q);
+    if (!geo) { toast.error("Couldn't locate that address — check the spelling."); return; }
+    setFly({ lat: geo.lat, lng: geo.lng });
+    if (geo.city) setPlace(`${geo.city}, ${geo.state}`);
+    setZoning({ address: geo.formatted, autoRun: true });
+  }
+
   const devMatches = React.useMemo(
     () => allDevs.filter((d) =>
       typeFilter.has(d.productType) &&
@@ -300,7 +313,21 @@ export default function MapPage() {
           </div>
           <div className="relative flex-1 min-w-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Search a city or state (e.g. Miami, FL)" value={place} onChange={(e) => setPlace(e.target.value)} />
+            <Input
+              className="pl-9"
+              placeholder="Search a city — or paste an address and press Enter"
+              value={place}
+              onChange={(e) => setPlace(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && addressShaped) searchAddress(); }}
+            />
+            {addressShaped && (
+              <button
+                onClick={searchAddress}
+                className="absolute right-9 top-1/2 -translate-y-1/2 rounded bg-gold-muted px-2 py-0.5 text-[11px] font-medium text-foreground hover:bg-gold/30"
+              >
+                X-ray ↵
+              </button>
+            )}
             {place && <button onClick={() => setPlace("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>}
           </div>
           {layer === "listings" && (
@@ -486,7 +513,7 @@ export default function MapPage() {
           onClose={() => select(null)}
         />
       )}
-      {zoning && <ZoningPanel init={zoning} onClose={() => setZoning(null)} />}
+      {zoning && <ZoningPanel key={zoning.address || "blank"} init={zoning} onClose={() => setZoning(null)} />}
       {selected?.kind === "listing" && (
         <ListingPanel
           listing={selected.data}
@@ -638,7 +665,7 @@ function ListingCard({ l, selected, watched, onWatch, onClick }: { l: Listing; s
  * (Chicago), no-zoning special case (Houston), and a works-anywhere manual
  * mode where the user types the numbers straight from their city's code.
  */
-function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: number }; onClose: () => void }) {
+function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: number; autoRun?: boolean }; onClose: () => void }) {
   const [address, setAddress] = React.useState(init.address);
   const [lotSqft, setLotSqft] = React.useState(init.lotSqft ?? 0);
   const [busy, setBusy] = React.useState(false);
@@ -668,6 +695,10 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
   // Whether the lot field holds an auto-filled value (safe to overwrite).
   const lotAutoRef = React.useRef(false);
   React.useEffect(() => () => window.clearTimeout(sugTimer.current), []);
+  React.useEffect(() => {
+    if (init.autoRun && init.address) check(init.address);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function onAddressChange(v: string) {
     setAddress(v);
@@ -848,7 +879,7 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
                   </div>
                 )}
 
-                {!res.cityInfo && (
+                {(!res.cityInfo || (!res.cityInfo.zones && !activeRules)) && (
                   <div className="rounded-md border border-border bg-card p-4">
                     <p className="text-sm text-foreground/90">
                       {res.city} isn't in Pencil's verified zoning table yet. Open the city's zoning code below,
