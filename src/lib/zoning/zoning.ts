@@ -510,6 +510,13 @@ export const CITY_ZONING: Record<string, CityZoning> = {
       },
     ],
   },
+  Hollywood: {
+    state: "FL",
+    // City of Hollywood's own zoning polygons (field "Zoning": RS-6, RM-18, ...).
+    gisServer: "https://maps.hollywoodfl.org/arcgis/rest/services/ZONING/FeatureServer",
+    codeUrl: "https://codelibrary.amlegal.com/codes/hollywood/latest/hollywoodldr_fl/0-0-0-679",
+    codeName: "Hollywood Zoning & Land Development Regulations, Art. 4 (RS/RM district schedules)",
+  },
   Seattle: {
     state: "WA",
     // Seattle GeoData hosted zoning (field ZONING, e.g. "NR3", "LR2").
@@ -801,6 +808,15 @@ const PARCEL_SOURCES: ParcelSource[] = [
     url: "https://gisweb.miamidade.gov/arcgis/rest/services/MD_LandInformation/MapServer",
     source: "Miami-Dade County GIS parcel records",
   },
+  {
+    // Florida statewide parcels — FDOR tax roll joined to polygons from all 67
+    // county property appraisers (FGIO-hosted; LND_SQFOOT = recorded land sf).
+    // Listed after Miami-Dade so the richer county source wins there.
+    match: (_c, s) => s === "FL",
+    kind: "arcgis",
+    url: "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Cadastral/FeatureServer",
+    source: "Florida DOR statewide parcel roll (county property appraisers)",
+  },
 ];
 
 /**
@@ -838,7 +854,7 @@ async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number):
     for (const svcUrl of services.slice(0, 4)) {
       try {
         const meta = (await getJson(`${svcUrl}?f=json`)) as { layers?: { id: number; name: string }[] };
-        const layer = meta.layers?.find((l) => /parcel/i.test(l.name) && !/label|anno|line|point|dissolve/i.test(l.name));
+        const layer = meta.layers?.find((l) => /parcel|cadastral/i.test(l.name) && !/label|anno|line|point|dissolve/i.test(l.name));
         if (!layer) { diag("no parcel layer in", svcUrl); continue; }
         const q = new URLSearchParams({
           geometry: `${lng},${lat}`,
@@ -857,7 +873,7 @@ async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number):
         if (!feat?.attributes) { diag(`no parcel at point (layer "${layer.name}")`, svcUrl); continue; }
         let lotSqft: number | undefined;
         for (const [k, v] of Object.entries(feat.attributes)) {
-          if (/^(lot_?size|land_?(sq_?ft|sqft|area|size)|parcel_?(area|size))/i.test(k) && !/val|price|tax|assess|bldg|building|year|code|flag/i.test(k)) {
+          if (/^(lot_?size|land_?(sq_?ft|sqft|area|size)|lnd_?sq_?f(?:oo)?t|parcel_?(area|size))/i.test(k) && !/val|price|tax|assess|bldg|building|year|code|flag/i.test(k)) {
             const n = saneLot(num(v));
             if (n) { lotSqft = n; break; }
           }
