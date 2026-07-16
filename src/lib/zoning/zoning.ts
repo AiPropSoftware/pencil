@@ -969,6 +969,33 @@ const PARCEL_SOURCES: ParcelSource[] = [
     url: "https://maps2.dcgis.dc.gov/dcgis/rest/services/DCGIS_DATA/Property_and_Land_WebMercator/MapServer/40",
     source: "DC common-ownership lots (OCTO)",
   },
+  {
+    match: (_c, s) => s === "IN",
+    kind: "arcgis",
+    url: "https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer",
+    source: "IndianaMap statewide parcel boundaries (IGIO)",
+  },
+  {
+    match: (_c, s) => s === "WI",
+    kind: "arcgis",
+    url: "https://services3.arcgis.com/n6uYoouQZW75n5WI/arcgis/rest/services/Wisconsin_Statewide_Parcels/FeatureServer",
+    source: "Wisconsin statewide parcels (DOA / State Cartographer)",
+    lotField: { name: "GISACRES", unit: "acres" },
+  },
+  {
+    match: (_c, s) => s === "NE",
+    kind: "arcgis",
+    url: "https://giscat.ne.gov/enterprise/rest/services/TaxParcels2023/FeatureServer",
+    source: "Nebraska statewide tax parcels (OCIO)",
+    lotField: { name: "Acres_Deeded", unit: "acres" },
+  },
+  {
+    // Field names vary by county submission — acre probing + geometry cover it.
+    match: (_c, s) => s === "OH",
+    kind: "arcgis",
+    url: "https://geo1.oit.ohio.gov/arcgis/rest/services/Statewide_Parcels_2022/MapServer",
+    source: "Ohio statewide parcels (OGRIP)",
+  },
 ];
 
 /**
