@@ -769,6 +769,10 @@ interface ParcelSource {
   /** Socrata resource URL, or ArcGIS REST services root for kind "arcgis". */
   url: string;
   source: string;
+  /** Known lot-area field for arcgis sources — explicit name + unit beats
+   * pattern-probing (some sources name an ACRES field "LOT_SIZE"). unitField
+   * handles per-record units (MassGIS LOT_UNITS: "A"=acres else sq ft). */
+  lotField?: { name: string; unit: "sqft" | "acres"; unitField?: { name: string; acresValue: string } };
   /** Known-schema field names; omitted → strict schema-agnostic probing. */
   fields?: { lot: string; zone?: string; residFar?: string; front?: string; depth?: string; address: string };
 }
@@ -817,6 +821,181 @@ const PARCEL_SOURCES: ParcelSource[] = [
     url: "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Cadastral/FeatureServer",
     source: "Florida DOR statewide parcel roll (county property appraisers)",
   },
+  {
+    match: (_c, s) => s === "MT",
+    kind: "arcgis",
+    url: "https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/Parcels/MapServer",
+    source: "Montana State Library cadastral (county assessors)",
+    lotField: { name: "GISAcres", unit: "acres" },
+  },
+  {
+    match: (_c, s) => s === "UT",
+    kind: "arcgis",
+    url: "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Parcels_Utah/FeatureServer",
+    source: "Utah SGID statewide parcels (UGRC)",
+    lotField: { name: "PARCEL_ACRES", unit: "acres" },
+  },
+  {
+    match: (_c, s) => s === "WY",
+    kind: "arcgis",
+    url: "https://gis.deq.wyo.gov/arcgis/rest/services/WY_PRIVATE_PARCELS/MapServer",
+    source: "Wyoming statewide private parcels (county assessors)",
+  },
+  {
+    // Participating counties only (~half the state, incl. the Front Range).
+    match: (_c, s) => s === "CO",
+    kind: "arcgis",
+    url: "https://gis.colorado.gov/public/rest/services/Address_and_Parcel/Colorado_Public_Parcels/FeatureServer",
+    source: "Colorado Public Parcels (OIT, participating counties)",
+  },
+  {
+    match: (_c, s) => s === "ID",
+    kind: "arcgis",
+    url: "https://gis.idwr.idaho.gov/hosting/rest/services/Reference/Parcels/FeatureServer",
+    source: "Idaho parcels compilation (county assessors)",
+  },
+  {
+    // No AZ statewide source — Maricopa County covers the Phoenix metro.
+    match: (_c, s) => s === "AZ",
+    kind: "arcgis",
+    url: "https://gis.mcassessor.maricopa.gov/arcgis/rest/services/Parcels/MapServer",
+    source: "Maricopa County Assessor parcels",
+  },
+  {
+    // No NV statewide source — Clark County covers the Las Vegas metro.
+    match: (_c, s) => s === "NV",
+    kind: "arcgis",
+    url: "https://services.arcgis.com/5BYw7o0uNAgcAttE/ArcGIS/rest/services/Clark_County_Boundary_Data/FeatureServer/2",
+    source: "Clark County GISMO parcels",
+  },
+  {
+    match: (_c, s) => s === "NC",
+    kind: "arcgis",
+    url: "https://services.nconemap.gov/secure/rest/services/NC1Map_Parcels/FeatureServer/1",
+    source: "NC OneMap statewide parcels (all 100 counties)",
+    lotField: { name: "gisacres", unit: "acres" },
+  },
+  {
+    match: (_c, s) => s === "AR",
+    kind: "arcgis",
+    url: "https://gis.arkansas.gov/arcgis/rest/services/FEATURESERVICES/Planning_Cadastre/FeatureServer/6",
+    source: "Arkansas GIS Office statewide parcels (county assessors)",
+  },
+  {
+    match: (_c, s) => s === "VA",
+    kind: "arcgis",
+    url: "https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer",
+    source: "Virginia VGIN statewide parcels",
+  },
+  {
+    match: (_c, s) => s === "WV",
+    kind: "arcgis",
+    url: "https://services.wvgis.wvu.edu/arcgis/rest/services/Planning_Cadastre/WV_Parcels/MapServer",
+    source: "West Virginia statewide tax parcels (WV Property Tax Division)",
+  },
+  {
+    match: (_c, s) => s === "WA",
+    kind: "arcgis",
+    url: "https://services.arcgis.com/jsIt88o09Q0r1j8h/arcgis/rest/services/Current_Parcels/FeatureServer",
+    source: "Washington State Parcels Project (all counties)",
+  },
+  {
+    match: (_c, s) => s === "HI",
+    kind: "arcgis",
+    url: "https://geodata.hawaii.gov/arcgis/rest/services/ParcelsZoning/MapServer/25",
+    source: "Hawaii statewide TMK parcels (Office of Planning)",
+    lotField: { name: "GISACRES", unit: "acres" },
+  },
+  {
+    // No merged AK fabric — Anchorage covers the main metro.
+    match: (_c, s) => s === "AK",
+    kind: "arcgis",
+    url: "https://services3.arcgis.com/hrGHbYKdjpN9Dagg/ArcGIS/rest/services/Parcels/FeatureServer",
+    source: "Municipality of Anchorage parcels",
+  },
+  {
+    match: (_c, s) => s === "VT",
+    kind: "arcgis",
+    url: "https://services1.arcgis.com/BkFxaEFNwHqX3tAw/arcgis/rest/services/FS_VCGI_VTPARCELS_WM_NOCACHE_v2/FeatureServer",
+    source: "Vermont statewide standardized parcels (VCGI)",
+    lotField: { name: "ACRESGL", unit: "acres" },
+  },
+  {
+    // LOT_SIZE units are per-record: LOT_UNITS "A" = acres, else square feet.
+    match: (_c, s) => s === "MA",
+    kind: "arcgis",
+    url: "https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/L3_TAXPAR_POLY_ASSESS_gdb/FeatureServer",
+    source: "MassGIS L3 property tax parcels (all 351 municipalities)",
+    lotField: { name: "LOT_SIZE", unit: "sqft", unitField: { name: "LOT_UNITS", acresValue: "A" } },
+  },
+  {
+    match: (_c, s) => s === "CT",
+    kind: "arcgis",
+    url: "https://services3.arcgis.com/3FL1kr7L4LvwA2Kb/arcgis/rest/services/Connecticut_CAMA_and_Parcel_Layer_2024/FeatureServer",
+    source: "Connecticut statewide CAMA + parcel layer (CT GIS Office)",
+    lotField: { name: "Land_Acres", unit: "acres" },
+  },
+  {
+    match: (_c, s) => s === "NJ",
+    kind: "arcgis",
+    url: "https://maps.nj.gov/arcgis/rest/services/Basemap/Parcels_NJ_WM/MapServer",
+    source: "NJ statewide parcel composite (NJOGIS / MOD-IV)",
+    lotField: { name: "CALC_ACRE", unit: "acres" },
+  },
+  {
+    match: (_c, s) => s === "MD",
+    kind: "arcgis",
+    url: "https://geodata.md.gov/imap/rest/services/PlanningCadastre/MD_ParcelBoundaries/MapServer",
+    source: "Maryland parcel boundaries (MD iMap / SDAT)",
+    lotField: { name: "POLYACRES", unit: "acres" },
+  },
+  {
+    // Public polygons cover ~38 of 62 counties; NYC itself is served by PLUTO above.
+    match: (_c, s) => s === "NY",
+    kind: "arcgis",
+    url: "https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Tax_Parcels_Public/MapServer/1",
+    source: "NYS tax parcels (participating counties)",
+    lotField: { name: "CALC_ACRES", unit: "acres" },
+  },
+  {
+    match: (_c, s) => s === "NH",
+    kind: "arcgis",
+    url: "https://nhgeodata.unh.edu/nhgeodata/rest/services/CAD/ParcelMosiac/MapServer",
+    source: "NH GRANIT statewide parcel mosaic",
+  },
+  {
+    match: (_c, s) => s === "DC",
+    kind: "arcgis",
+    url: "https://maps2.dcgis.dc.gov/dcgis/rest/services/DCGIS_DATA/Property_and_Land_WebMercator/MapServer/40",
+    source: "DC common-ownership lots (OCTO)",
+  },
+  {
+    match: (_c, s) => s === "IN",
+    kind: "arcgis",
+    url: "https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer",
+    source: "IndianaMap statewide parcel boundaries (IGIO)",
+  },
+  {
+    match: (_c, s) => s === "WI",
+    kind: "arcgis",
+    url: "https://services3.arcgis.com/n6uYoouQZW75n5WI/arcgis/rest/services/Wisconsin_Statewide_Parcels/FeatureServer",
+    source: "Wisconsin statewide parcels (DOA / State Cartographer)",
+    lotField: { name: "GISACRES", unit: "acres" },
+  },
+  {
+    match: (_c, s) => s === "NE",
+    kind: "arcgis",
+    url: "https://giscat.ne.gov/enterprise/rest/services/TaxParcels2023/FeatureServer",
+    source: "Nebraska statewide tax parcels (OCIO)",
+    lotField: { name: "Acres_Deeded", unit: "acres" },
+  },
+  {
+    // Field names vary by county submission — acre probing + geometry cover it.
+    match: (_c, s) => s === "OH",
+    kind: "arcgis",
+    url: "https://geo1.oit.ohio.gov/arcgis/rest/services/Statewide_Parcels_2022/MapServer",
+    source: "Ohio statewide parcels (OGRIP)",
+  },
 ];
 
 /**
@@ -825,15 +1004,17 @@ const PARCEL_SOURCES: ParcelSource[] = [
  * for a lot-size value (and a zoning code where the county carries one).
  * Any miss returns null — never a guess. Request budget is kept small.
  */
-async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number): Promise<{ lotSqft?: number; zone?: string } | null> {
+async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number, lotField?: { name: string; unit: "sqft" | "acres"; unitField?: { name: string; acresValue: string } }): Promise<{ lotSqft?: number; zone?: string } | null> {
   const diag = (msg: string, extra?: unknown) => {
     // eslint-disable-next-line no-console
     console.info("[Pencil] parcel lookup:", msg, extra ?? "");
   };
   try {
-    // Accept either a service URL (…/MapServer) or a REST root to discover from.
+    // Accept a direct layer URL (…/FeatureServer/2), a service URL
+    // (…/MapServer), or a REST root to discover from.
+    const directLayer = /\/(Map|Feature)Server\/\d+\/?$/.test(serverUrl);
     const services: string[] = [];
-    if (/\/(Map|Feature)Server\/?$/.test(serverUrl)) {
+    if (directLayer || /\/(Map|Feature)Server\/?$/.test(serverUrl)) {
       services.push(serverUrl.replace(/\/$/, ""));
     } else {
       const root = (await getJson(`${serverUrl}?f=json`)) as {
@@ -853,9 +1034,19 @@ async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number):
     }
     for (const svcUrl of services.slice(0, 4)) {
       try {
-        const meta = (await getJson(`${svcUrl}?f=json`)) as { layers?: { id: number; name: string }[] };
-        const layer = meta.layers?.find((l) => /parcel|cadastral/i.test(l.name) && !/label|anno|line|point|dissolve/i.test(l.name));
-        if (!layer) { diag("no parcel layer in", svcUrl); continue; }
+        let layerUrls: string[];
+        if (directLayer) {
+          layerUrls = [svcUrl];
+        } else {
+          const meta = (await getJson(`${svcUrl}?f=json`)) as { layers?: { id: number; name: string }[] };
+          // Some services split parcels across per-county layers — try up to 6.
+          const cand = (meta.layers ?? [])
+            .filter((l) => /parcel|cadastral|tmk/i.test(l.name) && !/label|anno|line|point|dissolve/i.test(l.name))
+            .slice(0, 6);
+          if (!cand.length) { diag("no parcel layer in", svcUrl); continue; }
+          layerUrls = cand.map((l) => `${svcUrl}/${l.id}`);
+        }
+        for (const layerUrl of layerUrls) {
         const q = new URLSearchParams({
           geometry: `${lng},${lat}`,
           geometryType: "esriGeometryPoint",
@@ -866,13 +1057,26 @@ async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number):
           outSR: "3857",
           f: "json",
         });
-        const data = (await getJson(`${svcUrl}/${layer.id}/query?${q}`)) as {
+        const data = (await getJson(`${layerUrl}/query?${q}`)) as {
           features?: { attributes?: Record<string, unknown>; geometry?: { rings?: number[][][] } }[];
         };
         const feat = data.features?.[0];
-        if (!feat?.attributes) { diag(`no parcel at point (layer "${layer.name}")`, svcUrl); continue; }
+        if (!feat?.attributes) { diag("no parcel at point", layerUrl); continue; }
         let lotSqft: number | undefined;
-        for (const [k, v] of Object.entries(feat.attributes)) {
+        // Explicit field hint first — exact name, known unit.
+        if (lotField) {
+          const key = Object.keys(feat.attributes).find((k) => k.toLowerCase() === lotField.name.toLowerCase());
+          const n = key != null ? num(feat.attributes[key]) : undefined;
+          if (n != null) {
+            let acres = lotField.unit === "acres";
+            if (lotField.unitField) {
+              const uk = Object.keys(feat.attributes).find((k) => k.toLowerCase() === lotField.unitField!.name.toLowerCase());
+              acres = uk != null && String(feat.attributes[uk]).trim().toUpperCase() === lotField.unitField.acresValue.toUpperCase();
+            }
+            lotSqft = saneLot(acres ? n * 43560 : n);
+          }
+        }
+        if (lotSqft == null) for (const [k, v] of Object.entries(feat.attributes)) {
           if (/^(lot_?size|land_?(sq_?ft|sqft|area|size)|lnd_?sq_?f(?:oo)?t|parcel_?(area|size))/i.test(k) && !/val|price|tax|assess|bldg|building|year|code|flag/i.test(k)) {
             const n = saneLot(num(v));
             if (n) { lotSqft = n; break; }
@@ -901,8 +1105,9 @@ async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number):
           if (lotSqft) diag("lot size computed from parcel boundary", lotSqft);
         }
         const zone = pickZoneValue(feat.attributes) ?? undefined;
-        diag("hit", { service: svcUrl, layer: layer.name, lotSqft, zone });
+        diag("hit", { layer: layerUrl, lotSqft, zone });
         if (lotSqft != null || zone) return { lotSqft, zone };
+        }
       } catch (e) {
         diag(`service failed: ${(e as Error).message}`, svcUrl);
       }
@@ -944,7 +1149,7 @@ export async function parcelAtAddress(
   if (!src) return null;
   if (src.kind === "arcgis") {
     if (lat == null || lng == null) return null;
-    const hit = await arcgisParcelAtPoint(src.url, lat, lng);
+    const hit = await arcgisParcelAtPoint(src.url, lat, lng, src.lotField);
     return hit ? { ...hit, source: src.source } : null;
   }
   try {
