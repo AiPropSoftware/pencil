@@ -769,6 +769,9 @@ interface ParcelSource {
   /** Socrata resource URL, or ArcGIS REST services root for kind "arcgis". */
   url: string;
   source: string;
+  /** Known lot-area field for arcgis sources — explicit name + unit beats
+   * pattern-probing (some sources name an ACRES field "LOT_SIZE"). */
+  lotField?: { name: string; unit: "sqft" | "acres" };
   /** Known-schema field names; omitted → strict schema-agnostic probing. */
   fields?: { lot: string; zone?: string; residFar?: string; front?: string; depth?: string; address: string };
 }
@@ -825,7 +828,7 @@ const PARCEL_SOURCES: ParcelSource[] = [
  * for a lot-size value (and a zoning code where the county carries one).
  * Any miss returns null — never a guess. Request budget is kept small.
  */
-async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number): Promise<{ lotSqft?: number; zone?: string } | null> {
+async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number, lotField?: { name: string; unit: "sqft" | "acres" }): Promise<{ lotSqft?: number; zone?: string } | null> {
   const diag = (msg: string, extra?: unknown) => {
     // eslint-disable-next-line no-console
     console.info("[Pencil] parcel lookup:", msg, extra ?? "");
@@ -872,7 +875,13 @@ async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number):
         const feat = data.features?.[0];
         if (!feat?.attributes) { diag(`no parcel at point (layer "${layer.name}")`, svcUrl); continue; }
         let lotSqft: number | undefined;
-        for (const [k, v] of Object.entries(feat.attributes)) {
+        // Explicit field hint first — exact name, known unit.
+        if (lotField) {
+          const key = Object.keys(feat.attributes).find((k) => k.toLowerCase() === lotField.name.toLowerCase());
+          const n = key != null ? num(feat.attributes[key]) : undefined;
+          if (n != null) lotSqft = saneLot(lotField.unit === "acres" ? n * 43560 : n);
+        }
+        if (lotSqft == null) for (const [k, v] of Object.entries(feat.attributes)) {
           if (/^(lot_?size|land_?(sq_?ft|sqft|area|size)|lnd_?sq_?f(?:oo)?t|parcel_?(area|size))/i.test(k) && !/val|price|tax|assess|bldg|building|year|code|flag/i.test(k)) {
             const n = saneLot(num(v));
             if (n) { lotSqft = n; break; }
@@ -944,7 +953,7 @@ export async function parcelAtAddress(
   if (!src) return null;
   if (src.kind === "arcgis") {
     if (lat == null || lng == null) return null;
-    const hit = await arcgisParcelAtPoint(src.url, lat, lng);
+    const hit = await arcgisParcelAtPoint(src.url, lat, lng, src.lotField);
     return hit ? { ...hit, source: src.source } : null;
   }
   try {
