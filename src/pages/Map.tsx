@@ -919,14 +919,48 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
                       )}
                     </div>
                   )}
-                  {env.buildableSqft != null && lotSqft > 0 && (
-                    <Button variant="gold" className="mt-3 w-full" asChild>
-                      <Link to={`/deal-analyzer?totalSqft=${env.buildableSqft}&address=${encodeURIComponent(res.formatted)}`}>
-                        Underwrite this envelope <ArrowRight className="h-4 w-4" />
-                      </Link>
-                    </Button>
-                  )}
                 </div>
+
+                {env.buildableSqft != null && lotSqft > 0 && (() => {
+                  // Instant pro forma: envelope + market calibration + the
+                  // financing model → the package, with land as the output
+                  // (the most the deal supports at target margin).
+                  const pfType: ProductType =
+                    env.units == null || env.units <= 1 ? "SFH"
+                    : env.units === 2 ? "Duplex"
+                    : env.units <= 4 ? "Fourplex"
+                    : "Small multi";
+                  const mkt = ppsfSummary(res.city);
+                  const opp = scoreOpportunity({ city: res.city, type: pfType, buildableSqft: env.buildableSqft!, areaPpsf: mkt.current });
+                  const srcLabel = mkt.source === "recorded"
+                    ? `recorded sales${mkt.liveSamples ? ` (${mkt.liveSamples} deeds)` : ""}`
+                    : mkt.source === "calibrated" ? "calibrated to published city medians" : "modeled — verify with local comps";
+                  const analyzerHref = `/deal-analyzer?arv=${opp.arv}&costPerSqft=${opp.buildPpsf}&totalSqft=${env.buildableSqft}&mode=sell&productType=${encodeURIComponent(pfType)}&address=${encodeURIComponent(res.formatted)}`;
+                  return (
+                    <div className="rounded-md border border-gold/40 bg-card p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="stat-label flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-gold" /> Instant pro forma</div>
+                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">{pfType} · {fmtNumber(env.buildableSqft)} sf</span>
+                      </div>
+                      <div className="mt-2 space-y-0.5">
+                        <Row label={`Sells for (ARV) @ $${fmtNumber(Math.round(mkt.current))}/sf`} value={fmtMoney(opp.arv)} />
+                        <Row label={`Build cost @ $${fmtNumber(opp.buildPpsf)}/sf`} value={fmtMoney(opp.buildCost)} />
+                        <Row label={`Selling costs (${(opp.sellingPct * 100).toFixed(1)}%)`} value={fmtMoney(opp.sellingCosts)} />
+                        <Row label={`Construction financing (${opp.finMonths} mo model)`} value={fmtMoney(opp.financing)} />
+                        <div className="flex items-center justify-between text-sm py-1 border-t border-border/60 mt-1 pt-1.5">
+                          <span className="font-medium text-foreground">Supports land up to ({Math.round(opp.targetMargin * 100)}% margin)</span>
+                          <span className="font-semibold tabular-nums text-emerald-600">{fmtMoney(opp.maxLandPrice)}</span>
+                        </div>
+                      </div>
+                      <p className="mt-1.5 text-[11px] text-muted-foreground leading-relaxed">
+                        Sale $/sf: {srcLabel}. The land figure is what this package supports at the target margin — your negotiated price replaces it in the full pro forma.
+                      </p>
+                      <Button variant="gold" className="mt-3 w-full" asChild>
+                        <Link to={analyzerHref}>Open the full pro forma <ArrowRight className="h-4 w-4" /></Link>
+                      </Button>
+                    </div>
+                  );
+                })()}
 
                 {gov && (
                   <a href={gov.zoning} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-gold hover:underline">
