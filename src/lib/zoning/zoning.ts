@@ -51,6 +51,12 @@ export interface CityZoning {
   /** Special case: the city has no zoning at all. */
   noZoning?: string;
   zones?: ZoneRules[];
+  /** Overlay/combining-district suffixes that ride on the base district in
+   * this city's zoning strings (Austin "CS-MU-V-CO-NP") — decoded and shown
+   * as caveats, never silently dropped. */
+  overlaySuffixes?: Record<string, string>;
+  /** City-wide caveats that ship with every result (product requirement). */
+  advisories?: string[];
 }
 
 export const CITY_ZONING: Record<string, CityZoning> = {
@@ -64,14 +70,26 @@ export const CITY_ZONING: Record<string, CityZoning> = {
     gisServer: "https://maps.austintexas.gov/arcgis/rest/services/ZoningProfile/ZoningProfile/MapServer",
     codeUrl: "https://library.municode.com/tx/austin/codes/land_development_code?nodeId=TIT25LADE_CH25-2ZO_SUBCHAPTER_CUSDERE_ART2PRUSDERE_DIV1RETA_S25-2-492SIDERE",
     codeName: "Austin LDC § 25-2-492 + HOME amendments (2023–24)",
+    // Full § 25-2-492 dimensional table (all 31 base districts) encoded from
+    // the official City of Austin Zoning Guide — same source as the repo's
+    // zoning/standards/austin_tx.json pilot vault (retrieved 2026-07-24).
+    // Coverage = max BUILDING coverage (impervious cover noted separately).
     zones: [
       {
+        code: "RR", name: "Rural Residence", uses: "Rural single-family (1-acre lots)",
+        coverage: 0.2, stories: 2, heightFt: 35,
+        setbacks: { front: "40 ft", side: "10 ft", rear: "20 ft" },
+        setbackFt: { front: 40, side: 10, rear: 20 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 1 acre (43,560 sf); impervious cover cap 25%.",
+      },
+      {
         code: "SF-1", name: "Single-Family (Large Lot)", uses: "Single-family; up to 3 units under HOME",
-        maxUnits: 3, minLotPerUnitSqft: 1800, coverage: 0.4, stories: 2, heightFt: 35,
+        maxUnits: 3, minLotPerUnitSqft: 1800, coverage: 0.35, stories: 2, heightFt: 35,
         setbacks: { front: "25 ft", side: "5 ft", rear: "10 ft" },
         setbackFt: { front: 25, side: 5, rear: 10 },
         source: "LDC § 25-2-492; HOME Phase 1–2",
-        notes: "HOME Phase 2 (2024) allows lots as small as ~1,800 sf per unit — verify current status with the city.",
+        notes: "Impervious cover cap 40%. HOME Phase 2 (2024) allows lots as small as ~1,800 sf per unit — verify current status with the city.",
       },
       {
         code: "SF-2", name: "Single-Family (Standard Lot)", uses: "Single-family; up to 3 units under HOME",
@@ -79,13 +97,31 @@ export const CITY_ZONING: Record<string, CityZoning> = {
         setbacks: { front: "25 ft", side: "5 ft", rear: "10 ft" },
         setbackFt: { front: 25, side: 5, rear: 10 },
         source: "LDC § 25-2-492; HOME Phase 1–2",
+        notes: "Impervious cover cap 45%.",
       },
       {
         code: "SF-3", name: "Family Residence", uses: "Single-family, duplex; up to 3 units under HOME",
-        maxUnits: 3, minLotPerUnitSqft: 1800, coverage: 0.45, stories: 2, heightFt: 35,
+        maxUnits: 3, minLotPerUnitSqft: 1800, coverage: 0.4, stories: 2, heightFt: 35,
         setbacks: { front: "25 ft", side: "5 ft", rear: "10 ft" },
         setbackFt: { front: 25, side: 5, rear: 10 },
         source: "LDC § 25-2-492; HOME Phase 1–2",
+        notes: "Impervious cover cap 45%.",
+      },
+      {
+        code: "SF-4A", name: "Single-Family (Small Lot)", uses: "Small-lot single-family",
+        coverage: 0.55, stories: 2, heightFt: 35,
+        setbacks: { front: "15 ft", side: "none in base table", rear: "none in base table" },
+        setbackFt: { front: 15, side: 0, rear: 0 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 3,600 sf; impervious cover cap 65%.",
+      },
+      {
+        code: "SF-5", name: "Urban Family Residence", uses: "Small-scale urban residential",
+        coverage: 0.4, stories: 2, heightFt: 35,
+        setbacks: { front: "25 ft", side: "5 ft", rear: "10 ft" },
+        setbackFt: { front: 25, side: 5, rear: 10 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 5,750 sf; impervious cover cap 55%.",
       },
       {
         code: "SF-6", name: "Townhouse & Condominium", uses: "Townhomes, condos, small multifamily",
@@ -95,12 +131,213 @@ export const CITY_ZONING: Record<string, CityZoning> = {
         source: "LDC § 25-2-492",
       },
       {
+        code: "MF-1", name: "Multifamily (Limited Density)", uses: "Garden apartments, small multifamily",
+        minLotPerUnitSqft: 2562, coverage: 0.45, stories: 3, heightFt: 40,
+        setbacks: { front: "25 ft", side: "5 ft", rear: "10 ft" },
+        setbackFt: { front: 25, side: 5, rear: 10 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "≈ max 17 units/acre; min lot 8,000 sf; impervious cover cap 55%.",
+      },
+      {
+        code: "MF-2", name: "Multifamily (Low Density)", uses: "Low-density multifamily",
+        minLotPerUnitSqft: 1894, coverage: 0.5, stories: 3, heightFt: 40,
+        setbacks: { front: "25 ft", side: "5 ft", rear: "10 ft" },
+        setbackFt: { front: 25, side: 5, rear: 10 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "≈ max 23 units/acre; min lot 8,000 sf; impervious cover cap 60%.",
+      },
+      {
         code: "MF-3", name: "Multifamily (Medium Density)", uses: "Apartments / condos",
-        minLotPerUnitSqft: 1000, coverage: 0.55, stories: 3, heightFt: 40,
+        minLotPerUnitSqft: 1210, far: 0.75, coverage: 0.55, stories: 3, heightFt: 40,
         setbacks: { front: "25 ft", side: "5 ft", rear: "10 ft" },
         setbackFt: { front: 25, side: 5, rear: 10 },
         source: "LDC § 25-2-492",
+        notes: "≈ max 36 units/acre; min lot 8,000 sf; impervious cover cap 65%.",
       },
+      {
+        code: "MF-4", name: "Multifamily (Moderate-High Density)", uses: "Mid-rise multifamily",
+        far: 0.75, coverage: 0.6, stories: 5, heightFt: 60,
+        setbacks: { front: "15 ft", side: "5 ft", rear: "10 ft" },
+        setbackFt: { front: 15, side: 5, rear: 10 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 8,000 sf; impervious cover cap 70%.",
+      },
+      {
+        code: "MF-5", name: "Multifamily (High Density)", uses: "High-density multifamily",
+        minLotPerUnitSqft: 807, far: 1.0, coverage: 0.6, stories: 5, heightFt: 60,
+        setbacks: { front: "15 ft", side: "5 ft", rear: "10 ft" },
+        setbackFt: { front: 15, side: 5, rear: 10 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "≈ max 54 units/acre; min lot 8,000 sf; impervious cover cap 70%.",
+      },
+      {
+        code: "MF-6", name: "Multifamily (Highest Density)", uses: "High-rise multifamily",
+        coverage: 0.7, stories: 8, heightFt: 90,
+        setbacks: { front: "15 ft", side: "5 ft", rear: "10 ft" },
+        setbackFt: { front: 15, side: 5, rear: 10 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "No FAR cap in the base district; min lot 8,000 sf; impervious cover cap 80%.",
+      },
+      {
+        code: "MH", name: "Mobile Home Residence", uses: "Mobile home residence",
+        heightFt: 35,
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 5,750 sf; the base table sets no coverage/setback numbers — site rules govern.",
+      },
+      {
+        code: "NO", name: "Neighborhood Office", uses: "Neighborhood-scale office",
+        far: 0.35, coverage: 0.35, heightFt: 35,
+        setbacks: { front: "25 ft", side: "5 ft", rear: "5 ft" },
+        setbackFt: { front: 25, side: 5, rear: 5 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 5,750 sf; impervious cover cap 60%.",
+      },
+      {
+        code: "LO", name: "Limited Office", uses: "Limited office",
+        far: 0.7, coverage: 0.5, heightFt: 40,
+        setbacks: { front: "25 ft", side: "5 ft", rear: "5 ft" },
+        setbackFt: { front: 25, side: 5, rear: 5 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 5,750 sf; impervious cover cap 70%.",
+      },
+      {
+        code: "GO", name: "General Office", uses: "General office",
+        far: 1.0, coverage: 0.6, heightFt: 60,
+        setbacks: { front: "15 ft", side: "5 ft", rear: "5 ft" },
+        setbackFt: { front: 15, side: 5, rear: 5 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 5,750 sf; impervious cover cap 80%.",
+      },
+      {
+        code: "CR", name: "Commercial Recreation", uses: "Commercial recreation",
+        far: 0.25, coverage: 0.25, heightFt: 40,
+        setbacks: { front: "50 ft", side: "20 ft", rear: "20 ft" },
+        setbackFt: { front: 50, side: 20, rear: 20 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 20,000 sf; impervious cover cap 60%.",
+      },
+      {
+        code: "LR", name: "Neighborhood Commercial", uses: "Neighborhood-serving retail/commercial",
+        far: 0.5, coverage: 0.5, heightFt: 40,
+        setbacks: { front: "25 ft", side: "none in base table", rear: "none in base table" },
+        setbackFt: { front: 25, side: 0, rear: 0 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 5,750 sf; impervious cover cap 80%.",
+      },
+      {
+        code: "GR", name: "Community Commercial", uses: "Community-scale commercial; residential via -MU or -V overlay",
+        far: 1.0, coverage: 0.75, heightFt: 60,
+        setbacks: { front: "10 ft", side: "none in base table", rear: "none in base table" },
+        setbackFt: { front: 10, side: 0, rear: 0 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 5,750 sf; impervious cover cap 90%.",
+      },
+      {
+        code: "L", name: "Lake Commercial", uses: "Lake-area commercial",
+        far: 8.0, coverage: 0.5, heightFt: 200,
+        setbacks: { front: "10 ft", side: "none in base table", rear: "none in base table" },
+        setbackFt: { front: 10, side: 0, rear: 0 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 5,750 sf; impervious cover cap 50%.",
+      },
+      {
+        code: "CBD", name: "Central Business District", uses: "Downtown core — office/residential/mixed high-rise",
+        far: 8.0, coverage: 1.0,
+        setbacks: { front: "none in base table", side: "none in base table", rear: "none in base table" },
+        setbackFt: { front: 0, side: 0, rear: 0 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "No height limit in the base district; downtown density-bonus program governs above base FAR 8.",
+      },
+      {
+        code: "DMU", name: "Downtown Mixed Use", uses: "Downtown mixed use",
+        far: 5.0, coverage: 1.0, heightFt: 120,
+        setbacks: { front: "none in base table", side: "none in base table", rear: "none in base table" },
+        setbackFt: { front: 0, side: 0, rear: 0 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+      },
+      {
+        code: "W/LO", name: "Warehouse/Limited Office", uses: "Warehouse / limited office",
+        far: 0.25, heightFt: 25,
+        setbacks: { front: "25 ft", side: "5 ft", rear: "25 ft" },
+        setbackFt: { front: 25, side: 5, rear: 25 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 1 acre; impervious cover cap 70%; no building-coverage cap in the base table.",
+      },
+      {
+        code: "CS", name: "General Commercial Services", uses: "Broad commercial services; residential via -MU or -V overlay",
+        far: 2.0, coverage: 0.95, heightFt: 60,
+        setbacks: { front: "10 ft", side: "none in base table", rear: "none in base table" },
+        setbackFt: { front: 10, side: 0, rear: 0 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 5,750 sf; impervious cover cap 95%.",
+      },
+      {
+        code: "CS-1", name: "Commercial-Liquor Sales", uses: "Commercial services incl. liquor sales; residential via -MU or -V overlay",
+        far: 2.0, coverage: 0.95, heightFt: 60,
+        setbacks: { front: "10 ft", side: "none in base table", rear: "none in base table" },
+        setbackFt: { front: 10, side: 0, rear: 0 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 5,750 sf; impervious cover cap 95%.",
+      },
+      {
+        code: "CH", name: "Commercial Highway", uses: "Highway-oriented commercial",
+        far: 3.0, coverage: 0.85,
+        setbacks: { front: "50 ft", side: "25 ft", rear: "25 ft" },
+        setbackFt: { front: 50, side: 25, rear: 25 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "No height limit in the base table; min lot 20,000 sf; impervious cover cap 85%.",
+      },
+      {
+        code: "IP", name: "Industrial Park", uses: "Industrial park",
+        far: 1.0, coverage: 0.5, heightFt: 60,
+        setbacks: { front: "25 ft", side: "50 ft", rear: "50 ft" },
+        setbackFt: { front: 25, side: 50, rear: 50 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 1 acre; impervious cover cap 80%.",
+      },
+      {
+        code: "LI", name: "Limited Industrial Service", uses: "Limited industrial service",
+        far: 1.0, coverage: 0.75, heightFt: 60,
+        setbacks: { front: "none in base table", side: "none in base table", rear: "none in base table" },
+        setbackFt: { front: 0, side: 0, rear: 0 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 5,750 sf; impervious cover cap 80%.",
+      },
+      {
+        code: "MI", name: "Major Industry", uses: "Major industry",
+        far: 1.0, coverage: 0.75, heightFt: 120,
+        setbacks: { front: "none in base table", side: "50 ft", rear: "50 ft" },
+        setbackFt: { front: 0, side: 50, rear: 50 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 50 acres; impervious cover cap 80%.",
+      },
+      {
+        code: "R&D", name: "Research & Development", uses: "Research & development campus",
+        far: 0.25, coverage: 0.4, heightFt: 45,
+        setbacks: { front: "75 ft", side: "100 ft", rear: "50 ft" },
+        setbackFt: { front: 75, side: 100, rear: 50 },
+        source: "Austin LDC § 25-2-492 (Zoning Guide, retrieved 2026-07-24)",
+        notes: "Min lot 5 acres; impervious cover cap 50%.",
+      },
+    ],
+    overlaySuffixes: {
+      MU: "Mixed Use combining district — allows residential in commercial districts",
+      V: "Vertical Mixed Use — modified standards under LDC 25-2 Subchapter E ch. 4; parking/setback/FAR bonuses",
+      CO: "Conditional Overlay — site-specific restrictions recorded in the rezoning ordinance; MUST pull the ordinance to know actual limits",
+      NP: "Neighborhood Plan — plan-specific infill options/restrictions",
+      NCCD: "Neighborhood Conservation Combining District — district-specific standards replace base standards; MUST consult NCCD ordinance",
+      H: "Historic Landmark",
+      HD: "Historic District",
+      ETOD: "Equitable Transit-Oriented Development overlay",
+      DBETOD: "Density Bonus ETOD — height/FAR bonuses along transit corridors",
+      PDA: "Planned Development Area",
+      TOD: "Transit-Oriented Development",
+    },
+    advisories: [
+      "Combining districts and overlays (-CO, -NCCD, -NP, -V, -ETOD…) can override any number shown; a -CO carries site-specific limits recorded in the rezoning ordinance.",
+      "SF dimensional standards are the base § 25-2-492 table; HOME amendments (2023–24) relaxed single-family rules — unit counts shown are HOME-aware, setbacks/coverage are the stricter base values.",
+      "Compatibility standards, floodplain, heritage trees, and watershed impervious-cover rules may further restrict development.",
+      "Informational only — verify with the City of Austin before design.",
     ],
   },
   Chicago: {
@@ -678,11 +915,22 @@ export async function zoneAtPoint(gisServer: string, lat: number, lng: number): 
  * a district code. Returns null rather than guess.
  */
 function pickZoneValue(rec: Record<string, unknown>): string | null {
-  const ok = (v: unknown): v is string =>
-    typeof v === "string" && v.trim().length > 0 && v.trim().length <= 20 && !/\d{4}/.test(v);
+  // Base codes are short, but combined-district stacks run long — Austin's
+  // "CS-MU-V-CO-ETOD-DBETOD-NP" is 25 chars and 100% legitimate. Allow past
+  // 20 chars only for the exact district-code fields (pass 1, allowStack) and
+  // only when the value is unmistakably a code stack: alnum segments joined
+  // by - / . — any case (some portals serve lowercase), no spaces, no prose.
+  // Generic pass-2 fields keep the strict cap so *_name labels and GUID-shaped
+  // ids can't masquerade as a zone.
+  const ok = (v: unknown, allowStack = false): v is string => {
+    if (typeof v !== "string") return false;
+    const t = v.trim();
+    if (!t.length || /\d{4}/.test(t)) return false;
+    return t.length <= 20 || (allowStack && t.length <= 40 && /^[A-Za-z0-9]+(?:[-/.][A-Za-z0-9]+)*$/.test(t));
+  };
   // Pass 1: exact district-code fields used by the wired city servers.
   for (const [k, v] of Object.entries(rec)) {
-    if (/^(zone_?district|zone_?class|zone_?cmplt|zoning_?ztype|zoning|ztype|transect)$/i.test(k) && ok(v)) return v.trim();
+    if (/^(zone_?district|zone_?class|zone_?cmplt|zoning_?ztype|zoning|ztype|transect)$/i.test(k) && ok(v, true)) return v.trim();
   }
   // Pass 2: conservative generic probe.
   for (const [k, v] of Object.entries(rec)) {
@@ -742,10 +990,35 @@ export async function zoneAtPointSocrata(url: string, field: string, lat: number
   }
 }
 
-/** Match a raw GIS zone string ("SF-3-NP") to a rules entry by prefix. */
+/** Match a raw GIS zone string ("SF-3-NP") to a rules entry by prefix.
+ * Longest code wins: "CS-1-CO" must match CS-1, never CS — overlay suffixes
+ * use the same hyphens as district codes (learned in the Austin pilot). */
 export function matchZoneRules(city: CityZoning, rawZone: string): ZoneRules | null {
   const z = rawZone.toUpperCase();
-  return city.zones?.find((r) => z === r.code || z.startsWith(`${r.code}-`)) ?? null;
+  let best: ZoneRules | null = null;
+  for (const r of city.zones ?? []) {
+    if (z === r.code || z.startsWith(`${r.code}-`)) {
+      if (!best || r.code.length > best.code.length) best = r;
+    }
+  }
+  return best;
+}
+
+/** Decode the overlay suffixes riding on a matched base district
+ * ("CS-MU-V-CO-NP" with base CS → MU, V, CO, NP with meanings). */
+export function zoneOverlays(
+  city: CityZoning,
+  rawZone: string,
+  matched: ZoneRules,
+): { suffix: string; meaning: string }[] {
+  if (!city.overlaySuffixes) return [];
+  const z = rawZone.toUpperCase();
+  if (!z.startsWith(`${matched.code}-`) || z.length <= matched.code.length + 1) return [];
+  return z
+    .slice(matched.code.length + 1)
+    .split("-")
+    .filter(Boolean)
+    .map((s) => ({ suffix: s, meaning: city.overlaySuffixes![s] ?? "unknown suffix — check ordinance" }));
 }
 
 export interface ParcelInfo {
