@@ -1,0 +1,80 @@
+{
+  "jurisdiction": {
+    "name": "City of Austin",
+    "state": "TX",
+    "fips_place": "4805000",
+    "code_publisher": "Municode",
+    "code_citation": "Austin Land Development Code § 25-2-492 (Site Development Regulations)",
+    "sources": [
+      "https://library.municode.com/tx/austin/codes/land_development_code (productId 15303, Municode API client 1113)",
+      "https://austin.widen.net/content/gozkyvstro/pdf/zoning_guide.pdf (official City of Austin Zoning Guide)"
+    ],
+    "gis": {
+      "zoning_service": "https://maps.austintexas.gov/gis/rest/Shared/Zoning_1/MapServer/0",
+      "overlay_service": "https://maps.austintexas.gov/gis/rest/Shared/Zoning_2/MapServer",
+      "spatial_reference_wkid": 2277,
+      "zone_field": "ZONING_ZTYPE",
+      "base_zone_field": "ZONING_BASE"
+    },
+    "retrieved": "2026-07-24",
+    "amendment_notes": "HOME Phase 1 (Ord. 20231207-001) and Phase 2 (2024) substantially relaxed single-family standards: up to 3 dwelling units on SF-1/SF-2/SF-3 lots, minimum lot size for a single unit reduced to 1,800 sq ft, and revised ADU/height rules. Values below are the base § 25-2-492 table; SF results must be presented with the HOME caveat until the amended tables are encoded. See https://www.austintexas.gov/development-services/home-amendments"
+  },
+  "units": {
+    "lot_size": "sq_ft",
+    "lot_width": "ft",
+    "setbacks": "ft",
+    "height": "ft",
+    "coverage": "percent",
+    "impervious": "percent",
+    "far": "ratio"
+  },
+  "districts": {
+    "RR":   {"name": "Rural Residence",              "category": "residential", "min_lot_size": 43560, "min_lot_width": 100, "max_height": 35,  "setback_front": 40, "setback_street_side": 25, "setback_interior_side": 10,  "setback_rear": 20, "max_building_coverage": 20,  "max_impervious": 25,  "max_far": null},
+    "SF-1": {"name": "Single Family (Large Lot)",    "category": "residential", "min_lot_size": 10000, "min_lot_width": 60,  "max_height": 35,  "setback_front": 25, "setback_street_side": 15, "setback_interior_side": 5,   "setback_rear": 10, "max_building_coverage": 35,  "max_impervious": 40,  "max_far": null},
+    "SF-2": {"name": "Single Family (Standard Lot)", "category": "residential", "min_lot_size": 5750,  "min_lot_width": 50,  "max_height": 35,  "setback_front": 25, "setback_street_side": 15, "setback_interior_side": 5,   "setback_rear": 10, "max_building_coverage": 40,  "max_impervious": 45,  "max_far": null},
+    "SF-3": {"name": "Family Residence",             "category": "residential", "min_lot_size": 5750,  "min_lot_width": 50,  "max_height": 35,  "setback_front": 25, "setback_street_side": 15, "setback_interior_side": 5,   "setback_rear": 10, "max_building_coverage": 40,  "max_impervious": 45,  "max_far": null},
+    "SF-4A":{"name": "Single Family (Small Lot)",    "category": "residential", "min_lot_size": 3600,  "min_lot_width": 40,  "max_height": 35,  "setback_front": 15, "setback_street_side": 10, "setback_interior_side": null,"setback_rear": null,"max_building_coverage": 55, "max_impervious": 65,  "max_far": null},
+    "SF-5": {"name": "Urban Family Residence",       "category": "residential", "min_lot_size": 5750,  "min_lot_width": 50,  "max_height": 35,  "setback_front": 25, "setback_street_side": 15, "setback_interior_side": 5,   "setback_rear": 10, "max_building_coverage": 40,  "max_impervious": 55,  "max_far": null},
+    "SF-6": {"name": "Townhouse & Condominium",      "category": "residential", "min_lot_size": 5750,  "min_lot_width": 50,  "max_height": 35,  "setback_front": 25, "setback_street_side": 15, "setback_interior_side": 5,   "setback_rear": 10, "max_building_coverage": 40,  "max_impervious": 55,  "max_far": null},
+    "MF-1": {"name": "Multifamily (Limited Density)","category": "residential", "min_lot_size": 8000,  "min_lot_width": 50,  "max_height": 40,  "setback_front": 25, "setback_street_side": 15, "setback_interior_side": 5,   "setback_rear": 10, "max_building_coverage": 45,  "max_impervious": 55,  "max_far": null, "max_units_per_acre": 17},
+    "MF-2": {"name": "Multifamily (Low Density)",    "category": "residential", "min_lot_size": 8000,  "min_lot_width": 50,  "max_height": 40,  "setback_front": 25, "setback_street_side": 15, "setback_interior_side": 5,   "setback_rear": 10, "max_building_coverage": 50,  "max_impervious": 60,  "max_far": null, "max_units_per_acre": 23},
+    "MF-3": {"name": "Multifamily (Medium Density)", "category": "residential", "min_lot_size": 8000,  "min_lot_width": 50,  "max_height": 40,  "setback_front": 25, "setback_street_side": 15, "setback_interior_side": 5,   "setback_rear": 10, "max_building_coverage": 55,  "max_impervious": 65,  "max_far": 0.75, "max_units_per_acre": 36},
+    "MF-4": {"name": "Multifamily (Moderate-High)",  "category": "residential", "min_lot_size": 8000,  "min_lot_width": 50,  "max_height": 60,  "setback_front": 15, "setback_street_side": 15, "setback_interior_side": 5,   "setback_rear": 10, "max_building_coverage": 60,  "max_impervious": 70,  "max_far": 0.75},
+    "MF-5": {"name": "Multifamily (High Density)",   "category": "residential", "min_lot_size": 8000,  "min_lot_width": 50,  "max_height": 60,  "setback_front": 15, "setback_street_side": 15, "setback_interior_side": 5,   "setback_rear": 10, "max_building_coverage": 60,  "max_impervious": 70,  "max_far": 1.0,  "max_units_per_acre": 54},
+    "MF-6": {"name": "Multifamily (Highest Density)","category": "residential", "min_lot_size": 8000,  "min_lot_width": 50,  "max_height": 90,  "setback_front": 15, "setback_street_side": 15, "setback_interior_side": 5,   "setback_rear": 10, "max_building_coverage": 70,  "max_impervious": 80,  "max_far": null},
+    "MH":   {"name": "Mobile Home Residence",        "category": "residential", "min_lot_size": 5750,  "min_lot_width": null,"max_height": 35,  "setback_front": null,"setback_street_side": null,"setback_interior_side": null,"setback_rear": null,"max_building_coverage": null,"max_impervious": null,"max_far": null},
+    "NO":   {"name": "Neighborhood Office",          "category": "office",      "min_lot_size": 5750,  "min_lot_width": 50,  "max_height": 35,  "setback_front": 25, "setback_street_side": 15, "setback_interior_side": 5,   "setback_rear": 5,  "max_building_coverage": 35,  "max_impervious": 60,  "max_far": 0.35},
+    "LO":   {"name": "Limited Office",               "category": "office",      "min_lot_size": 5750,  "min_lot_width": 50,  "max_height": 40,  "setback_front": 25, "setback_street_side": 15, "setback_interior_side": 5,   "setback_rear": 5,  "max_building_coverage": 50,  "max_impervious": 70,  "max_far": 0.7},
+    "GO":   {"name": "General Office",               "category": "office",      "min_lot_size": 5750,  "min_lot_width": 50,  "max_height": 60,  "setback_front": 15, "setback_street_side": 15, "setback_interior_side": 5,   "setback_rear": 5,  "max_building_coverage": 60,  "max_impervious": 80,  "max_far": 1.0},
+    "CR":   {"name": "Commercial Recreation",        "category": "commercial",  "min_lot_size": 20000, "min_lot_width": 100, "max_height": 40,  "setback_front": 50, "setback_street_side": 50, "setback_interior_side": 20,  "setback_rear": 20, "max_building_coverage": 25,  "max_impervious": 60,  "max_far": 0.25},
+    "LR":   {"name": "Neighborhood Commercial",      "category": "commercial",  "min_lot_size": 5750,  "min_lot_width": 50,  "max_height": 40,  "setback_front": 25, "setback_street_side": 15, "setback_interior_side": null,"setback_rear": null,"max_building_coverage": 50, "max_impervious": 80,  "max_far": 0.5},
+    "GR":   {"name": "Community Commercial",         "category": "commercial",  "min_lot_size": 5750,  "min_lot_width": 50,  "max_height": 60,  "setback_front": 10, "setback_street_side": 10, "setback_interior_side": null,"setback_rear": null,"max_building_coverage": 75, "max_impervious": 90,  "max_far": 1.0},
+    "L":    {"name": "Lake Commercial",              "category": "commercial",  "min_lot_size": 5750,  "min_lot_width": 50,  "max_height": 200, "setback_front": 10, "setback_street_side": 10, "setback_interior_side": null,"setback_rear": null,"max_building_coverage": 50, "max_impervious": 50,  "max_far": 8.0},
+    "CBD":  {"name": "Central Business District",    "category": "commercial",  "min_lot_size": null,  "min_lot_width": null,"max_height": null,"setback_front": null,"setback_street_side": null,"setback_interior_side": null,"setback_rear": null,"max_building_coverage": 100,"max_impervious": 100,"max_far": 8.0},
+    "DMU":  {"name": "Downtown Mixed Use",           "category": "commercial",  "min_lot_size": null,  "min_lot_width": null,"max_height": 120, "setback_front": null,"setback_street_side": null,"setback_interior_side": null,"setback_rear": null,"max_building_coverage": 100,"max_impervious": 100,"max_far": 5.0},
+    "W/LO": {"name": "Warehouse/Limited Office",     "category": "commercial",  "min_lot_size": 43560, "min_lot_width": 100, "max_height": 25,  "setback_front": 25, "setback_street_side": 25, "setback_interior_side": 5,   "setback_rear": 25, "max_building_coverage": null,"max_impervious": 70, "max_far": 0.25},
+    "CS":   {"name": "General Commercial Services",  "category": "commercial",  "min_lot_size": 5750,  "min_lot_width": 50,  "max_height": 60,  "setback_front": 10, "setback_street_side": 10, "setback_interior_side": null,"setback_rear": null,"max_building_coverage": 95, "max_impervious": 95,  "max_far": 2.0},
+    "CS-1": {"name": "Commercial-Liquor Sales",      "category": "commercial",  "min_lot_size": 5750,  "min_lot_width": 50,  "max_height": 60,  "setback_front": 10, "setback_street_side": 10, "setback_interior_side": null,"setback_rear": null,"max_building_coverage": 95, "max_impervious": 95,  "max_far": 2.0},
+    "CH":   {"name": "Commercial Highway",           "category": "commercial",  "min_lot_size": 20000, "min_lot_width": 50,  "max_height": null,"setback_front": 50, "setback_street_side": 50, "setback_interior_side": 25,  "setback_rear": 25, "max_building_coverage": 85,  "max_impervious": 85,  "max_far": 3.0},
+    "IP":   {"name": "Industrial Park",              "category": "industrial",  "min_lot_size": 43560, "min_lot_width": 100, "max_height": 60,  "setback_front": 25, "setback_street_side": 25, "setback_interior_side": 50,  "setback_rear": 50, "max_building_coverage": 50,  "max_impervious": 80,  "max_far": 1.0},
+    "LI":   {"name": "Limited Industrial Service",   "category": "industrial",  "min_lot_size": 5750,  "min_lot_width": 50,  "max_height": 60,  "setback_front": null,"setback_street_side": null,"setback_interior_side": null,"setback_rear": null,"max_building_coverage": 75, "max_impervious": 80,  "max_far": 1.0},
+    "MI":   {"name": "Major Industry",               "category": "industrial",  "min_lot_size": 2178000,"min_lot_width": 250,"max_height": 120, "setback_front": null,"setback_street_side": null,"setback_interior_side": 50,  "setback_rear": 50, "max_building_coverage": 75,  "max_impervious": 80,  "max_far": 1.0},
+    "R&D":  {"name": "Research & Development",       "category": "industrial",  "min_lot_size": 217800,"min_lot_width": 100, "max_height": 45,  "setback_front": 75, "setback_street_side": 100,"setback_interior_side": 100, "setback_rear": 50, "max_building_coverage": 40,  "max_impervious": 50,  "max_far": 0.25}
+  },
+  "overlay_flags": {
+    "description": "Suffixes in ZONING_ZTYPE beyond the base district modify or add standards. These must be surfaced as caveats on every result.",
+    "known_suffixes": {
+      "MU": "Mixed Use combining district — allows residential in commercial districts",
+      "V": "Vertical Mixed Use — modified standards under LDC 25-2 Subchapter E ch. 4; parking/setback/FAR bonuses",
+      "CO": "Conditional Overlay — site-specific restrictions recorded in the rezoning ordinance; MUST pull the ordinance to know actual limits",
+      "NP": "Neighborhood Plan — plan-specific infill options/restrictions",
+      "NCCD": "Neighborhood Conservation Combining District — district-specific standards replace base standards; MUST consult NCCD ordinance",
+      "H": "Historic Landmark",
+      "HD": "Historic District",
+      "ETOD": "Equitable Transit-Oriented Development overlay",
+      "DBETOD": "Density Bonus ETOD — height/FAR bonuses along transit corridors",
+      "PDA": "Planned Development Area",
+      "TOD": "Transit-Oriented Development"
+    }
+  }
+}

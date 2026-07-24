@@ -1,0 +1,119 @@
+[
+  {
+    "address": "1600 S 1ST ST, AUSTIN, TX, 78704",
+    "coordinates": {
+      "lat": 30.249343,
+      "lon": -97.755249
+    },
+    "zoning_string": "CS-MU-V-CO-ETOD-DBETOD-NP",
+    "base_district": "CS",
+    "base_district_name": "General Commercial Services",
+    "standards": {
+      "min_lot_size": 5750,
+      "min_lot_width": 50,
+      "max_height": 60,
+      "setback_front": 10,
+      "setback_street_side": 10,
+      "setback_interior_side": null,
+      "setback_rear": null,
+      "max_building_coverage": 95,
+      "max_impervious": 95,
+      "max_far": 2.0
+    },
+    "overlays": {
+      "MU": "Mixed Use combining district \u2014 allows residential in commercial districts",
+      "V": "Vertical Mixed Use \u2014 modified standards under LDC 25-2 Subchapter E ch. 4; parking/setback/FAR bonuses",
+      "CO": "Conditional Overlay \u2014 site-specific restrictions recorded in the rezoning ordinance; MUST pull the ordinance to know actual limits",
+      "ETOD": "Equitable Transit-Oriented Development overlay",
+      "DBETOD": "Density Bonus ETOD \u2014 height/FAR bonuses along transit corridors",
+      "NP": "Neighborhood Plan \u2014 plan-specific infill options/restrictions"
+    },
+    "assumed_lot": {
+      "sqft": 12000,
+      "width_ft": null,
+      "depth_ft": null
+    },
+    "buildable_envelope": {
+      "max_building_footprint_sqft": 11400,
+      "max_impervious_sqft": 11400,
+      "max_floor_area_sqft": 24000,
+      "lot_meets_minimum": true
+    }
+  },
+  {
+    "address": "2400 E 6TH ST, AUSTIN, TX, 78702",
+    "coordinates": {
+      "lat": 30.259655,
+      "lon": -97.716501
+    },
+    "zoning_string": "CS-V-CO-NP",
+    "base_district": "CS",
+    "base_district_name": "General Commercial Services",
+    "standards": {
+      "min_lot_size": 5750,
+      "min_lot_width": 50,
+      "max_height": 60,
+      "setback_front": 10,
+      "setback_street_side": 10,
+      "setback_interior_side": null,
+      "setback_rear": null,
+      "max_building_coverage": 95,
+      "max_impervious": 95,
+      "max_far": 2.0
+    },
+    "overlays": {
+      "V": "Vertical Mixed Use \u2014 modified standards under LDC 25-2 Subchapter E ch. 4; parking/setback/FAR bonuses",
+      "CO": "Conditional Overlay \u2014 site-specific restrictions recorded in the rezoning ordinance; MUST pull the ordinance to know actual limits",
+      "NP": "Neighborhood Plan \u2014 plan-specific infill options/restrictions"
+    },
+    "assumed_lot": {
+      "sqft": 8000,
+      "width_ft": null,
+      "depth_ft": null
+    },
+    "buildable_envelope": {
+      "max_building_footprint_sqft": 7600,
+      "max_impervious_sqft": 7600,
+      "max_floor_area_sqft": 16000,
+      "lot_meets_minimum": true
+    }
+  },
+  {
+    "address": "4507 AVE G, AUSTIN, TX, 78751",
+    "coordinates": {
+      "lat": 30.307849,
+      "lon": -97.726331
+    },
+    "zoning_string": "SF-3-NCCD-NP",
+    "base_district": "SF-3",
+    "base_district_name": "Family Residence",
+    "standards": {
+      "min_lot_size": 5750,
+      "min_lot_width": 50,
+      "max_height": 35,
+      "setback_front": 25,
+      "setback_street_side": 15,
+      "setback_interior_side": 5,
+      "setback_rear": 10,
+      "max_building_coverage": 40,
+      "max_impervious": 45,
+      "max_far": null
+    },
+    "overlays": {
+      "NCCD": "Neighborhood Conservation Combining District \u2014 district-specific standards replace base standards; MUST consult NCCD ordinance",
+      "NP": "Neighborhood Plan \u2014 plan-specific infill options/restrictions"
+    },
+    "assumed_lot": {
+      "sqft": 6600,
+      "width_ft": 50.0,
+      "depth_ft": 132.0
+    },
+    "buildable_envelope": {
+      "max_building_footprint_sqft": 2640,
+      "max_impervious_sqft": 2970,
+      "lot_meets_minimum": true,
+      "setback_buildable_area_sqft": 3880,
+      "setback_buildable_dims_ft": "40 x 97"
+    }
+  }
+]

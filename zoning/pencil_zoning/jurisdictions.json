@@ -1,0 +1,9 @@
+{
+  "austin_tx": {
+    "name": "City of Austin, TX",
+    "endpoint": "https://maps.austintexas.gov/gis/rest/Shared/Zoning_1/MapServer/0/query",
+    "wkid": 2277,
+    "zone_field": "ZONING_ZTYPE",
+    "standards_file": "standards/austin_tx.json"
+  }
+}
