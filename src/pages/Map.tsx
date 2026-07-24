@@ -18,7 +18,7 @@ import { setLiveSaleRates } from "@/lib/underwrite/liveSaleRates";
 import { fetchMlsListings } from "@/providers/listings/mls";
 import { discoverCityPermits } from "@/providers/permits/discovery";
 import { geocodeVerify, geocodeAddress, suggestAddresses, type AddressSuggestion } from "@/lib/googleMaps";
-import { CITY_ZONING, zoneAtPoint, zoneAtPointSocrata, zoneAtAddress, parcelAtAddress, matchZoneRules, envelope, type CityZoning, type ZoneRules, type ParcelInfo } from "@/lib/zoning/zoning";
+import { CITY_ZONING, zoneAtPoint, zoneAtPointSocrata, zoneAtAddress, parcelAtAddress, matchZoneRules, zoneOverlays, envelope, type CityZoning, type ZoneRules, type ParcelInfo } from "@/lib/zoning/zoning";
 import { GoogleMapView } from "@/components/GoogleMapView";
 
 // Heavy libraries load on demand, never on first paint: Leaflet only when the
@@ -876,7 +876,31 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
                       {activeRules.minLotPerUnitSqft != null && <Row label="Min lot per unit" value={`${fmtNumber(activeRules.minLotPerUnitSqft)} sf`} />}
                     </div>
                     <p className="mt-2 text-[11px] text-muted-foreground">Source: {activeRules.source}{activeRules.notes ? ` — ${activeRules.notes}` : ""}</p>
+                    {res.rules && res.rawZone && res.cityInfo && (() => {
+                      const ovl = zoneOverlays(res.cityInfo, res.rawZone, res.rules);
+                      if (!ovl.length) return null;
+                      return (
+                        <div className="mt-2.5 border-t border-border/60 pt-2">
+                          <div className="stat-label">Overlays riding on this district</div>
+                          <ul className="mt-1 space-y-0.5">
+                            {ovl.map((o) => (
+                              <li key={o.suffix} className="text-[11px] leading-relaxed text-muted-foreground">
+                                <span className="font-medium text-foreground/80">-{o.suffix}</span> — {o.meaning}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })()}
                   </div>
+                )}
+
+                {res.cityInfo?.advisories && (
+                  <ul className="space-y-1 rounded-md border border-border bg-card p-3.5">
+                    {res.cityInfo.advisories.map((a, i) => (
+                      <li key={i} className="text-[11px] leading-relaxed text-muted-foreground">{a}</li>
+                    ))}
+                  </ul>
                 )}
 
                 {(!res.cityInfo || (!res.cityInfo.zones && !activeRules)) && (
