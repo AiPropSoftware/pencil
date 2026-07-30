@@ -107,25 +107,29 @@ const CHECKS = [
     name: "Chicago zoning polygons point query (7cve-jgbp)",
     expectZone: "RT-4",
     async run() {
-      const base = "https://data.cityofchicago.org/resource/7cve-jgbp.json";
-      const url = `${base}?$select=zone_class&$where=` + encodeURIComponent("intersects(the_geom, 'POINT(-87.6776 41.9075)')");
-      let rows;
-      try {
-        rows = await fetchJson(url);
-      } catch (e) {
-        if (/no-such-column/i.test(String(e.message))) {
-          // Self-diagnose via the metadata API (SODA rows came back keyless).
-          const meta = await fetchJson("https://data.cityofchicago.org/api/views/7cve-jgbp.json").catch(() => null);
-          const cols = (meta?.columns || []).map((c) => c.fieldName).join(",");
-          throw new Error(`zone_class column GONE — app's Chicago zone lookup is broken. Dataset columns: ${cols.slice(0, 300) || "metadata unavailable"}`);
-        }
-        throw e;
+      // The dataset migrated backends: .json rows come back keyless and
+      // zone_class errors. The .geojson rendition still exposes attribute
+      // names — discover the zone field + working geometry column from it.
+      const base = "https://data.cityofchicago.org/resource/7cve-jgbp";
+      const gj = await fetchJson(`${base}.geojson?$limit=1`);
+      const props = gj?.features?.[0]?.properties ?? {};
+      const fields = Object.keys(props);
+      const zoneField = fields.find((f) => /zone.*class|^zone$|zoning/i.test(f)) || fields.find((f) => /class/i.test(f));
+      if (!zoneField) throw new Error(`no zone-like field in geojson properties: ${fields.join(",").slice(0, 200) || "none"}`);
+      const point = "'POINT(-87.6776 41.9075)'";
+      let z = null;
+      let via = null;
+      for (const geomCol of ["the_geom", "geometry"]) {
+        try {
+          const hit = await fetchJson(`${base}.geojson?$where=` + encodeURIComponent(`intersects(${geomCol}, ${point})`) + "&$limit=1", 1);
+          const p = hit?.features?.[0]?.properties;
+          if (p && p[zoneField]) { z = p[zoneField]; via = geomCol; break; }
+        } catch {}
       }
-      if (!Array.isArray(rows) || !rows.length || !rows[0].zone_class)
-        throw new Error("no zone_class for known point (2114 W Charleston)");
-      const z = rows[0].zone_class;
-      if (z !== this.expectZone) return { warn: `zone drift at test point: expected ${this.expectZone}, got ${z} — rezoning? re-verify` };
-      return `zone_class ${z} at test point`;
+      if (!z) throw new Error(`point query failed with both geometry column names (zone field discovered: ${zoneField}; all fields: ${fields.join(",").slice(0, 160)})`);
+      const detail = `zone ${z} via field "${zoneField}" + geometry column "${via}" (.geojson rendition) — repoint the app accordingly`;
+      if (z !== this.expectZone) return { warn: `${detail}; drift: expected ${this.expectZone}` };
+      return detail;
     },
   },
   {
@@ -168,7 +172,6 @@ const CHECKS = [
     ["San Francisco", "https://data.sfgov.org/resource/i98e-djp9.json"],
     ["New York", "https://data.cityofnewyork.us/resource/ipu4-2q9a.json"],
     ["Los Angeles", "https://data.lacity.org/resource/pi9x-tg5x.json"],
-    ["Fort Worth", "https://data.fortworthtexas.gov/resource/quz7-xnsy.json"],
     ["Dallas", "https://www.dallasopendata.com/resource/e7gq-4sah.json"],
   ].map(([city, url]) => ({
     name: `${city} permit feed`,
@@ -202,24 +205,57 @@ const CHECKS = [
   {
     name: "Miami permit feed (city ArcGIS Building_Permits)",
     async run() {
-      // Run #2 found layer 0 swapped to aggregate census counts. Scan the
-      // service for the layer that actually holds permit records.
-      const root = "https://services6.arcgis.com/ONZht79c8QWuX759/arcgis/rest/services/Building_Permits/FeatureServer";
-      const svc = await fetchJson(`${root}?f=json`);
-      const layers = [...(svc.layers || []), ...(svc.tables || [])];
+      // The Building_Permits service was repurposed to census aggregates
+      // (run #2). Hunt the whole City of Miami AGOL org for the service that
+      // still holds permit RECORDS (PermitNumber + CompanyName).
+      const org = "https://services6.arcgis.com/ONZht79c8QWuX759/arcgis/rest/services";
+      const list = await fetchJson(`${org}?f=json`);
+      const cands = (list.services || []).filter((s) => /permit/i.test(s.name)).slice(0, 8);
+      if (!cands.length) throw new Error(`no permit-named services in the org (${(list.services || []).length} services total)`);
       const seen = [];
-      for (const l of layers.slice(0, 8)) {
-        const meta = await fetchJson(`${root}/${l.id}?f=json`).catch(() => null);
-        const names = (meta?.fields || []).map((f) => f.name);
-        if (names.includes("PermitNumber") && names.includes("CompanyName")) {
-          const q = await fetchJson(`${root}/${l.id}/query?where=1%3D1&outFields=*&resultRecordCount=3&returnGeometry=false&f=json`);
-          if ((q.features || []).length) return `record layer is ${l.id} "${l.name}" (${q.features.length} sampled)`;
-          seen.push(`${l.id}:${l.name}(fields ok, no rows)`);
-        } else {
-          seen.push(`${l.id}:${l.name}[${names.slice(0, 4).join("/")}]`);
+      for (const s of cands) {
+        const root = `${org}/${s.name}/${s.type}`;
+        const svc = await fetchJson(`${root}?f=json`).catch(() => null);
+        for (const l of [...(svc?.layers || []), ...(svc?.tables || [])].slice(0, 4)) {
+          const meta = await fetchJson(`${root}/${l.id}?f=json`).catch(() => null);
+          const names = (meta?.fields || []).map((f) => f.name);
+          if (names.includes("PermitNumber") && names.includes("CompanyName")) {
+            const q = await fetchJson(`${root}/${l.id}/query?where=1%3D1&outFields=*&resultRecordCount=3&returnGeometry=false&f=json`).catch(() => null);
+            if ((q?.features || []).length) return `record layer found: ${root}/${l.id} ("${s.name}"/"${l.name}") — adopt in arcgis.ts`;
+            seen.push(`${s.name}/${l.id}(fields ok, no rows)`);
+          } else {
+            seen.push(`${s.name}/${l.id}:${l.name}[${names.slice(0, 3).join("/")}]`);
+          }
         }
       }
-      throw new Error(`no layer with PermitNumber+CompanyName — scanned: ${seen.join("; ").slice(0, 300)}`);
+      throw new Error(`no PermitNumber+CompanyName layer among permit-named services — scanned: ${seen.join("; ").slice(0, 320)}`);
+    },
+  },
+  {
+    name: "Fort Worth permit feed",
+    async run() {
+      // The Socrata portal is gone — data.fortworthtexas.gov is now an
+      // ArcGIS Hub. Find the permits dataset via the site-scoped DCAT feed
+      // and test its GeoService distribution.
+      const dcat = await fetchJson("https://data.fortworthtexas.gov/api/feed/dcat-us/1.1.json");
+      const sets = (dcat.dataset || []).filter((d) => /permit/i.test(d.title || ""));
+      if (!sets.length) throw new Error(`no permit datasets in the DCAT feed (${(dcat.dataset || []).length} total)`);
+      const notes = [];
+      for (const d of sets.slice(0, 6)) {
+        const dist = (d.distribution || []).find(
+          (x) => /geoservice|esri rest/i.test(`${x.title || ""} ${x.format || ""}`) || /(Feature|Map)Server/.test(x.accessURL || ""),
+        );
+        const url = dist?.accessURL;
+        if (!url) { notes.push(`"${d.title}": no geoservice link`); continue; }
+        const layerUrl = /Server\/\d+/.test(url) ? url : `${url.replace(/\/$/, "")}/0`;
+        const q = await fetchJson(`${layerUrl}/query?where=1%3D1&outFields=*&resultRecordCount=3&returnGeometry=false&f=json`).catch((e) => ({ err: String(e.message).slice(0, 60) }));
+        if ((q.features || []).length) {
+          const fields = Object.keys(q.features[0].attributes || {});
+          return `dataset "${d.title}" → ${layerUrl} (fields: ${fields.slice(0, 10).join(",")}) — adopt as the FW source`;
+        }
+        notes.push(`"${d.title}": ${q.err || JSON.stringify(q.error || {}).slice(0, 60)}`);
+      }
+      throw new Error(`no queryable permit layer — ${notes.join("; ").slice(0, 350)}`);
     },
   },
 
@@ -240,11 +276,16 @@ const CHECKS = [
       // run #2). Resolve the current public endpoint from TxGIO's AGOL item
       // first, then fall back through known hosts — the success message
       // names the endpoint the app should use.
-      const candidates = [];
+      const candidates = [
+        // Host-swap of the AGOL item's dead feature.tnris.org URL onto the
+        // current TxGIO host (the "most_recent" alias tracks yearly renames).
+        "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer",
+        "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/FeatureServer",
+      ];
       const item = await fetchJson(
         "https://www.arcgis.com/sharing/rest/content/items/3b262ce74a864836972188fca772ca48?f=json",
       ).catch(() => null);
-      if (item?.url) candidates.push(item.url.replace(/\/+$/, ""));
+      if (item?.url) candidates.push(item.url.replace(/\/+$/, "").replace(/\/\d+$/, ""));
       candidates.push(
         "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap25_land_parcels_48/FeatureServer",
         "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap25_land_parcels_48/MapServer",
@@ -299,37 +340,64 @@ const CHECKS = [
   {
     name: "MassGIS parcels (LOT_SIZE + LOT_UNITS fields)",
     async run() {
-      const root = "https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/L3_TAXPAR_POLY_ASSESS_gdb/FeatureServer";
-      const svc = await fetchJson(`${root}?f=json`);
-      const nodes = [...(svc.layers || []), ...(svc.tables || [])].slice(0, 12);
-      if (!nodes.length)
-        throw new Error(`service listed no layers/tables — keys: ${Object.keys(svc).join(",")}; error: ${JSON.stringify(svc.error || null).slice(0, 160)}`);
+      // The L3_TAXPAR_POLY_ASSESS_gdb service vanished ("Invalid URL",
+      // run #2) — scan the MassGIS AGOL org for the renamed successor.
+      const org = "https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services";
+      const roots = ["https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/L3_TAXPAR_POLY_ASSESS_gdb/FeatureServer"];
+      const list = await fetchJson(`${org}?f=json`).catch(() => null);
+      roots.push(
+        ...(list?.services || [])
+          .filter((s) => /taxpar|parcel|assess/i.test(s.name))
+          .slice(0, 8)
+          .map((s) => `${org}/${s.name}/${s.type}`),
+      );
       const seen = [];
-      for (const l of nodes) {
-        const meta = await fetchJson(`${root}/${l.id}?f=json`).catch(() => null);
-        const names = (meta?.fields || []).map((f) => f.name.toUpperCase());
-        if (names.includes("LOT_SIZE") && names.includes("LOT_UNITS")) return `fields present on ${l.id} "${l.name}"`;
-        seen.push(`${l.id}:${l.name}[${names.slice(0, 6).join("/")}]`);
+      for (const root of [...new Set(roots)]) {
+        const svc = await fetchJson(`${root}?f=json`).catch(() => null);
+        for (const l of [...(svc?.layers || []), ...(svc?.tables || [])].slice(0, 5)) {
+          const meta = await fetchJson(`${root}/${l.id}?f=json`).catch(() => null);
+          const names = (meta?.fields || []).map((f) => f.name.toUpperCase());
+          if (names.includes("LOT_SIZE") && names.includes("LOT_UNITS"))
+            return `fields present: ${root}/${l.id} ("${l.name}") — adopt this URL if it differs from the app's`;
+          seen.push(`${root.split("/services/")[1]}/${l.id}`);
+        }
       }
-      throw new Error(`LOT_SIZE/LOT_UNITS not found — scanned ${seen.join("; ").slice(0, 350)}`);
+      throw new Error(`LOT_SIZE/LOT_UNITS not found — scanned ${seen.join("; ").slice(0, 300) || "(org list unavailable)"}`);
     },
   },
   {
     name: "NJ statewide parcels (CALC_ACRE field)",
     async run() {
-      const root = "https://maps.nj.gov/arcgis/rest/services/Basemap/Parcels_NJ_WM/MapServer";
-      const svc = await fetchJson(`${root}?f=json`);
-      const nodes = [...(svc.layers || []), ...(svc.tables || [])].slice(0, 12);
-      if (!nodes.length)
-        throw new Error(`service listed no layers/tables — keys: ${Object.keys(svc).join(",")}; error: ${JSON.stringify(svc.error || null).slice(0, 160)}`);
-      const fieldDump = [];
-      for (const l of nodes) {
-        const meta = await fetchJson(`${root}/${l.id}?f=json`).catch(() => null);
-        const names = (meta?.fields || []).map((f) => f.name);
-        if (names.some((n) => /^calc_acre$/i.test(n))) return `CALC_ACRE present on ${l.id} "${l.name}"`;
-        fieldDump.push(`${l.id}:${l.name}[${names.slice(0, 20).join("/")}]`);
+      // Layer 0 of Basemap/Parcels_NJ_WM lost its MOD-IV attributes — try
+      // the FeatureServer sibling, then scan maps.nj.gov for a parcel
+      // service that still carries CALC_ACRE.
+      const roots = [
+        "https://maps.nj.gov/arcgis/rest/services/Basemap/Parcels_NJ_WM/FeatureServer",
+        "https://maps.nj.gov/arcgis/rest/services/Basemap/Parcels_NJ_WM/MapServer",
+      ];
+      const top = await fetchJson("https://maps.nj.gov/arcgis/rest/services?f=json").catch(() => null);
+      const folders = (top?.folders || []).filter((f) => /base|feat|cadastr|parcel|tax/i.test(f)).slice(0, 4);
+      for (const f of folders) {
+        const sub = await fetchJson(`https://maps.nj.gov/arcgis/rest/services/${f}?f=json`).catch(() => null);
+        roots.push(
+          ...(sub?.services || [])
+            .filter((s) => /parcel|modiv|mod_iv|cadastr/i.test(s.name))
+            .slice(0, 4)
+            .map((s) => `https://maps.nj.gov/arcgis/rest/services/${s.name}/${s.type}`),
+        );
       }
-      throw new Error(`CALC_ACRE not found — ${fieldDump.join("; ").slice(0, 400)}`);
+      const seen = [];
+      for (const root of [...new Set(roots)].slice(0, 10)) {
+        const svc = await fetchJson(`${root}?f=json`).catch(() => null);
+        for (const l of [...(svc?.layers || []), ...(svc?.tables || [])].slice(0, 6)) {
+          const meta = await fetchJson(`${root}/${l.id}?f=json`).catch(() => null);
+          const names = (meta?.fields || []).map((f) => f.name);
+          if (names.some((n) => /^calc_acre$/i.test(n)))
+            return `CALC_ACRE present: ${root}/${l.id} ("${l.name}") — adopt this URL if it differs from the app's`;
+          seen.push(`${root.split("/services/")[1]}/${l.id}:${l.name}`);
+        }
+      }
+      throw new Error(`CALC_ACRE not found — scanned ${seen.join("; ").slice(0, 350)}`);
     },
   },
 
