@@ -71,18 +71,24 @@ function newestDate(rows) {
   return max;
 }
 
-/** Diagnostic: what a Socrata portal's catalog offers for a query — used when
- * a known dataset dies so the failure message names likely successors. */
+/** Diagnostic: what a portal's catalog offers for a query — used when a known
+ * dataset dies so the failure message names likely successors. Tries the
+ * Socrata catalog (domain-scoped) first, then the ArcGIS Hub API (some cities
+ * migrated portals wholesale, e.g. Fort Worth). */
 async function catalogCandidates(host, q) {
   try {
-    const cat = await fetchJson(`https://${host}/api/catalog/v1?q=${encodeURIComponent(q)}&only=datasets&limit=6`);
-    return (cat.results || [])
-      .map((r) => `${r.resource?.id} "${r.resource?.name}"`)
-      .join("; ")
-      .slice(0, 400) || "none found";
-  } catch (e) {
-    return `catalog probe failed: ${String(e.message).slice(0, 80)}`;
-  }
+    const cat = await fetchJson(
+      `https://${host}/api/catalog/v1?q=${encodeURIComponent(q)}&only=datasets&limit=6&search_context=${host}`,
+    );
+    const hits = (cat.results || []).map((r) => `${r.resource?.id} "${r.resource?.name}"`).join("; ");
+    if (hits) return `socrata: ${hits.slice(0, 380)}`;
+  } catch {}
+  try {
+    const hub = await fetchJson(`https://${host}/api/v3/datasets?q=${encodeURIComponent(q)}&page[size]=6`);
+    const hits = (hub.data || []).map((d) => `${d.id} "${d.attributes?.name}"`).join("; ");
+    if (hits) return `arcgis-hub: ${hits.slice(0, 380)}`;
+  } catch {}
+  return "no catalog reachable on this host (portal migrated?)";
 }
 
 const CHECKS = [
@@ -108,10 +114,10 @@ const CHECKS = [
         rows = await fetchJson(url);
       } catch (e) {
         if (/no-such-column/i.test(String(e.message))) {
-          // Self-diagnose: report the dataset's actual field names.
-          const sample = await fetchJson(`${base}?$limit=1`).catch(() => null);
-          const fields = sample?.[0] ? Object.keys(sample[0]).join(",") : "unavailable";
-          throw new Error(`zone_class column GONE — app's Chicago zone lookup is broken. Actual fields: ${fields}`);
+          // Self-diagnose via the metadata API (SODA rows came back keyless).
+          const meta = await fetchJson("https://data.cityofchicago.org/api/views/7cve-jgbp.json").catch(() => null);
+          const cols = (meta?.columns || []).map((c) => c.fieldName).join(",");
+          throw new Error(`zone_class column GONE — app's Chicago zone lookup is broken. Dataset columns: ${cols.slice(0, 300) || "metadata unavailable"}`);
         }
         throw e;
       }
@@ -123,13 +129,25 @@ const CHECKS = [
     },
   },
   {
-    name: "Austin ZoningProfile GIS service",
+    // The city retired ZoningProfile (404, caught by canary run #2). This is
+    // the pilot-verified base zoning layer, queried exactly the way the app
+    // would (inSR=4326 + 120 ft tolerance) — green here means the app can
+    // safely point at it without client-side reprojection.
+    name: "Austin base zoning layer (Shared/Zoning_1, app-style query)",
+    expectZone: "CS-MU-V-CO-ETOD-DBETOD-NP",
     async run() {
-      const svc = await fetchJson("https://maps.austintexas.gov/arcgis/rest/services/ZoningProfile/ZoningProfile/MapServer?f=json");
-      const layers = svc.layers || [];
-      if (!layers.some((l) => /zoning/i.test(l.name || "")))
-        throw new Error(`no zoning layer found — response keys: ${Object.keys(svc).join(",")}; error: ${JSON.stringify(svc.error || null)}; layers: ${layers.map((l) => l.name).join(", ").slice(0, 160)}`);
-      return `${layers.length} layers, zoning layer present`;
+      const url =
+        "https://maps.austintexas.gov/gis/rest/Shared/Zoning_1/MapServer/0/query" +
+        `?geometry=${encodeURIComponent("-97.755249,30.249343")}&geometryType=esriGeometryPoint&inSR=4326` +
+        "&spatialRel=esriSpatialRelIntersects&distance=120&units=esriSRUnit_Foot&outFields=*&returnGeometry=false&f=json";
+      const data = await fetchJson(url);
+      const attrs = data.features?.[0]?.attributes;
+      if (!attrs)
+        throw new Error(`no features at 1600 S 1st (${JSON.stringify(data.error || data).slice(0, 140)}) — inSR=4326 may be unsupported here; do NOT wire the app to this layer without reprojection`);
+      const z = attrs.ZONING_ZTYPE;
+      if (!z) throw new Error(`ZONING_ZTYPE missing — fields: ${Object.keys(attrs).join(",").slice(0, 140)}`);
+      if (z !== this.expectZone) return { warn: `zone drift at 1600 S 1st: expected ${this.expectZone}, got ${z}` };
+      return `ZONING_ZTYPE ${z} via inSR=4326 + 120 ft tolerance`;
     },
   },
   {
@@ -184,17 +202,24 @@ const CHECKS = [
   {
     name: "Miami permit feed (city ArcGIS Building_Permits)",
     async run() {
-      // Mirror the app's query shape: outFields=* and no orderBy (the layer
-      // rejected a field-list + orderBy combination).
-      const url =
-        "https://services6.arcgis.com/ONZht79c8QWuX759/arcgis/rest/services/Building_Permits/FeatureServer/0/query" +
-        "?where=1%3D1&outFields=*&resultRecordCount=10&returnGeometry=false&f=json";
-      const data = await fetchJson(url);
-      const feats = data.features || [];
-      if (!feats.length) throw new Error(`no features (${JSON.stringify(data).slice(0, 160)})`);
-      const a = feats[0].attributes || {};
-      if (!("PermitNumber" in a) || !("CompanyName" in a)) throw new Error(`expected fields missing: ${Object.keys(a).join(",").slice(0, 160)}`);
-      return `${feats.length} permits, fields intact`;
+      // Run #2 found layer 0 swapped to aggregate census counts. Scan the
+      // service for the layer that actually holds permit records.
+      const root = "https://services6.arcgis.com/ONZht79c8QWuX759/arcgis/rest/services/Building_Permits/FeatureServer";
+      const svc = await fetchJson(`${root}?f=json`);
+      const layers = [...(svc.layers || []), ...(svc.tables || [])];
+      const seen = [];
+      for (const l of layers.slice(0, 8)) {
+        const meta = await fetchJson(`${root}/${l.id}?f=json`).catch(() => null);
+        const names = (meta?.fields || []).map((f) => f.name);
+        if (names.includes("PermitNumber") && names.includes("CompanyName")) {
+          const q = await fetchJson(`${root}/${l.id}/query?where=1%3D1&outFields=*&resultRecordCount=3&returnGeometry=false&f=json`);
+          if ((q.features || []).length) return `record layer is ${l.id} "${l.name}" (${q.features.length} sampled)`;
+          seen.push(`${l.id}:${l.name}(fields ok, no rows)`);
+        } else {
+          seen.push(`${l.id}:${l.name}[${names.slice(0, 4).join("/")}]`);
+        }
+      }
+      throw new Error(`no layer with PermitNumber+CompanyName — scanned: ${seen.join("; ").slice(0, 300)}`);
     },
   },
 
@@ -211,25 +236,41 @@ const CHECKS = [
   {
     name: "Texas StratMap statewide parcels (point hit)",
     async run() {
-      const root = "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap25_land_parcels_48/MapServer";
-      const svc = await fetchJson(`${root}?f=json`);
-      let layerId = (svc.layers || [])[0]?.id;
-      if (layerId == null) {
-        // Some ArcGIS roots omit `layers` on cached JSON — try layer 0
-        // directly before declaring the service gone.
-        const probe = await fetchJson(`${root}/0?f=json`).catch(() => null);
-        if (probe?.name != null) layerId = 0;
-        else throw new Error(`service returned no layers — keys: ${Object.keys(svc).join(",")}; error: ${JSON.stringify(svc.error || null)}`);
+      // 2026-07: the MapServer began answering 499 "Token Required" (canary
+      // run #2). Resolve the current public endpoint from TxGIO's AGOL item
+      // first, then fall back through known hosts — the success message
+      // names the endpoint the app should use.
+      const candidates = [];
+      const item = await fetchJson(
+        "https://www.arcgis.com/sharing/rest/content/items/3b262ce74a864836972188fca772ca48?f=json",
+      ).catch(() => null);
+      if (item?.url) candidates.push(item.url.replace(/\/+$/, ""));
+      candidates.push(
+        "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap25_land_parcels_48/FeatureServer",
+        "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap25_land_parcels_48/MapServer",
+      );
+      const errors = [];
+      for (const root of [...new Set(candidates)]) {
+        try {
+          const q =
+            `${root}/0/query?geometry=${encodeURIComponent("-96.9561,32.5885")}` +
+            "&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&returnGeometry=false&f=json";
+          const data = await fetchJson(q);
+          const attrs = data.features?.[0]?.attributes;
+          if (!attrs) {
+            errors.push(`${root}: ${JSON.stringify(data.error || {}).slice(0, 90)}`);
+            continue;
+          }
+          const acreEntry = Object.entries(attrs).find(
+            ([k, v]) => /acre|gis_area|lgl_area/i.test(k) && typeof v === "number" && v > 0.005 && v < 5000,
+          );
+          if (acreEntry) return `parcel hit via ${root} — ${acreEntry[0]}=${acreEntry[1]}`;
+          errors.push(`${root}: no acreage field (${Object.keys(attrs).join(",").slice(0, 90)})`);
+        } catch (e) {
+          errors.push(`${root}: ${String(e.message).slice(0, 90)}`);
+        }
       }
-      const q =
-        `${root}/${layerId}/query?geometry=${encodeURIComponent("-96.9561,32.5885")}` +
-        "&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&returnGeometry=false&f=json";
-      const data = await fetchJson(q);
-      const attrs = data.features?.[0]?.attributes;
-      if (!attrs) throw new Error(`no parcel at Cedar Hill test point (${JSON.stringify(data.error || data).slice(0, 140)})`);
-      const acreEntry = Object.entries(attrs).find(([k, v]) => /acre|gis_area|lgl_area/i.test(k) && typeof v === "number" && v > 0.005 && v < 5000);
-      if (!acreEntry) throw new Error(`no sane acreage field: ${Object.keys(attrs).join(",").slice(0, 140)}`);
-      return `parcel hit; ${acreEntry[0]}=${acreEntry[1]}`;
+      throw new Error(`all candidates failed — ${errors.join(" | ").slice(0, 450)}`);
     },
   },
   {
@@ -261,14 +302,16 @@ const CHECKS = [
       const root = "https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/L3_TAXPAR_POLY_ASSESS_gdb/FeatureServer";
       const svc = await fetchJson(`${root}?f=json`);
       const nodes = [...(svc.layers || []), ...(svc.tables || [])].slice(0, 12);
+      if (!nodes.length)
+        throw new Error(`service listed no layers/tables — keys: ${Object.keys(svc).join(",")}; error: ${JSON.stringify(svc.error || null).slice(0, 160)}`);
       const seen = [];
       for (const l of nodes) {
         const meta = await fetchJson(`${root}/${l.id}?f=json`).catch(() => null);
         const names = (meta?.fields || []).map((f) => f.name.toUpperCase());
         if (names.includes("LOT_SIZE") && names.includes("LOT_UNITS")) return `fields present on ${l.id} "${l.name}"`;
-        seen.push(`${l.id}:${l.name}`);
+        seen.push(`${l.id}:${l.name}[${names.slice(0, 6).join("/")}]`);
       }
-      throw new Error(`LOT_SIZE/LOT_UNITS not found — scanned ${seen.join(", ").slice(0, 220)}`);
+      throw new Error(`LOT_SIZE/LOT_UNITS not found — scanned ${seen.join("; ").slice(0, 350)}`);
     },
   },
   {
@@ -277,13 +320,16 @@ const CHECKS = [
       const root = "https://maps.nj.gov/arcgis/rest/services/Basemap/Parcels_NJ_WM/MapServer";
       const svc = await fetchJson(`${root}?f=json`);
       const nodes = [...(svc.layers || []), ...(svc.tables || [])].slice(0, 12);
-      const seen = [];
+      if (!nodes.length)
+        throw new Error(`service listed no layers/tables — keys: ${Object.keys(svc).join(",")}; error: ${JSON.stringify(svc.error || null).slice(0, 160)}`);
+      const fieldDump = [];
       for (const l of nodes) {
         const meta = await fetchJson(`${root}/${l.id}?f=json`).catch(() => null);
-        if ((meta?.fields || []).some((f) => /^calc_acre$/i.test(f.name))) return `CALC_ACRE present on ${l.id} "${l.name}"`;
-        seen.push(`${l.id}:${l.name}`);
+        const names = (meta?.fields || []).map((f) => f.name);
+        if (names.some((n) => /^calc_acre$/i.test(n))) return `CALC_ACRE present on ${l.id} "${l.name}"`;
+        fieldDump.push(`${l.id}:${l.name}[${names.slice(0, 20).join("/")}]`);
       }
-      throw new Error(`CALC_ACRE not found — scanned ${seen.join(", ").slice(0, 220)}`);
+      throw new Error(`CALC_ACRE not found — ${fieldDump.join("; ").slice(0, 400)}`);
     },
   },
 
