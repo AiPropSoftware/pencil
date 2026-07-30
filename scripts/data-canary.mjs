@@ -112,7 +112,7 @@ const CHECKS = [
       const url =
         "https://data.cityofchicago.org/resource/dj47-wfun.json?$select=zone_class&$where=" +
         encodeURIComponent("intersects(the_geom, 'POINT(-87.6776 41.9075)')");
-      const rows = await fetchJson(url);
+      const rows = await fetchJson(url, 3);
       if (!Array.isArray(rows) || !rows.length || !rows[0].zone_class)
         throw new Error(`no zone_class for known point (${JSON.stringify(rows).slice(0, 140)})`);
       const z = rows[0].zone_class;
@@ -261,71 +261,22 @@ const CHECKS = [
   {
     name: "Texas StratMap statewide parcels (point hit)",
     async run() {
-      // 2026-07: the MapServer began answering 499 "Token Required" (canary
-      // run #2). Resolve the current public endpoint from TxGIO's AGOL item
-      // first, then fall back through known hosts — the success message
-      // names the endpoint the app should use.
-      const candidates = [
-        // Host-swap of the AGOL item's dead feature.tnris.org URL onto the
-        // current TxGIO host (the "most_recent" alias tracks yearly renames).
-        "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer",
-        "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/FeatureServer",
-      ];
-      const item = await fetchJson(
-        "https://www.arcgis.com/sharing/rest/content/items/3b262ce74a864836972188fca772ca48?f=json",
-      ).catch(() => null);
-      if (item?.url) candidates.push(item.url.replace(/\/+$/, "").replace(/\/\d+$/, ""));
-      candidates.push(
-        "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap25_land_parcels_48/FeatureServer",
-        "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap25_land_parcels_48/MapServer",
+      // stratmap25 went token-walled (2026-07); the public "most_recent"
+      // alias disables query but answers identify — which is exactly how the
+      // app now reads it (op: "identify" in PARCEL_SOURCES).
+      const mr = "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer";
+      const [lng, lat, d] = [-96.9561, 32.5885, 0.002];
+      const idUrl =
+        `${mr}/identify?geometry=${lng},${lat}&geometryType=esriGeometryPoint&sr=4326&layers=all&tolerance=2` +
+        `&mapExtent=${lng - d},${lat - d},${lng + d},${lat + d}&imageDisplay=400,400,96&returnGeometry=false&f=json`;
+      const idData = await fetchJson(idUrl);
+      const attrs = idData.results?.[0]?.attributes;
+      if (!attrs) throw new Error(`identify: no parcel at Cedar Hill test point (${JSON.stringify(idData.error || {}).slice(0, 120)})`);
+      const acreEntry = Object.entries(attrs).find(
+        ([k, v]) => /acre|gis_area|lgl_area|legal_area/i.test(k) && Number(v) > 0.005 && Number(v) < 5000,
       );
-      const errors = [];
-      for (const root of [...new Set(candidates)]) {
-        try {
-          const q =
-            `${root}/0/query?geometry=${encodeURIComponent("-96.9561,32.5885")}` +
-            "&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&returnGeometry=false&f=json";
-          const data = await fetchJson(q);
-          const attrs = data.features?.[0]?.attributes;
-          if (!attrs) {
-            errors.push(`${root}: ${JSON.stringify(data.error || {}).slice(0, 90)}`);
-            continue;
-          }
-          const acreEntry = Object.entries(attrs).find(
-            ([k, v]) => /acre|gis_area|lgl_area/i.test(k) && typeof v === "number" && v > 0.005 && v < 5000,
-          );
-          if (acreEntry) return `parcel hit via ${root} — ${acreEntry[0]}=${acreEntry[1]}`;
-          errors.push(`${root}: no acreage field (${Object.keys(attrs).join(",").slice(0, 90)})`);
-        } catch (e) {
-          errors.push(`${root}: ${String(e.message).slice(0, 90)}`);
-        }
-      }
-      // The tiled "most_recent" MapServer may have query disabled — the
-      // identify operation often still works on it.
-      try {
-        const mr = "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer";
-        const [lng, lat, d] = [-96.9561, 32.5885, 0.002];
-        const idUrl =
-          `${mr}/identify?geometry=${lng},${lat}&geometryType=esriGeometryPoint&sr=4326&layers=all:0&tolerance=2` +
-          `&mapExtent=${lng - d},${lat - d},${lng + d},${lat + d}&imageDisplay=400,400,96&returnGeometry=false&f=json`;
-        const idData = await fetchJson(idUrl);
-        const attrs = idData.results?.[0]?.attributes;
-        if (attrs) {
-          const acreEntry = Object.entries(attrs).find(
-            ([k, v]) => /acre|gis_area|lgl_area/i.test(k) && Number(v) > 0.005 && Number(v) < 5000,
-          );
-          return {
-            warn:
-              `query op disabled but IDENTIFY works on ${mr} — ` +
-              `${acreEntry ? `${acreEntry[0]}=${acreEntry[1]}` : `fields: ${Object.keys(attrs).join(",").slice(0, 100)}`}` +
-              `; the app needs an identify fallback to use this service`,
-          };
-        }
-        errors.push(`identify: no result (${JSON.stringify(idData.error || {}).slice(0, 80)})`);
-      } catch (e) {
-        errors.push(`identify: ${String(e.message).slice(0, 80)}`);
-      }
-      throw new Error(`all candidates failed — ${errors.join(" | ").slice(0, 500)}`);
+      if (!acreEntry) throw new Error(`identify hit but no sane acreage field: ${Object.keys(attrs).join(",").slice(0, 160)}`);
+      return `parcel hit via identify — ${acreEntry[0]}=${acreEntry[1]} (app uses op:"identify" on this service)`;
     },
   },
   {

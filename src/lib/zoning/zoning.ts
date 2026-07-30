@@ -1078,6 +1078,9 @@ interface ParcelSource {
    * pattern-probing (some sources name an ACRES field "LOT_SIZE"). unitField
    * handles per-record units (MassGIS LOT_UNITS: "A"=acres else sq ft). */
   lotField?: { name: string; unit: "sqft" | "acres"; unitField?: { name: string; acresValue: string } };
+  /** Some servers disable the query op but allow identify (TxGIO "most
+   * recent" parcels) — "identify" routes point lookups through that op. */
+  op?: "identify";
   /** Known-schema field names; omitted → strict schema-agnostic probing. */
   fields?: { lot: string; zone?: string; residFar?: string; front?: string; depth?: string; address: string };
 }
@@ -1100,10 +1103,14 @@ const PARCEL_SOURCES: ParcelSource[] = [
   {
     // Texas statewide land parcels — TxGIO StratMap, aggregated annually from
     // 245+ county appraisal districts. Area arrives in acres (GIS_AREA).
+    // The versioned stratmap25 service went token-walled in 2026-07 (caught
+    // by the data canary); the public "most_recent" alias disables query but
+    // answers identify — canary-verified with GIS_AREA at a Cedar Hill point.
     match: (_c, s) => s === "TX",
     kind: "arcgis",
-    url: "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap25_land_parcels_48/MapServer",
+    url: "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer",
     source: "Texas StratMap parcel records (county appraisal districts)",
+    op: "identify",
   },
   {
     // Miami-Dade County GIS parcels — covers every municipality in the county
@@ -1316,7 +1323,7 @@ const PARCEL_SOURCES: ParcelSource[] = [
  * for a lot-size value (and a zoning code where the county carries one).
  * Any miss returns null — never a guess. Request budget is kept small.
  */
-async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number, lotField?: { name: string; unit: "sqft" | "acres"; unitField?: { name: string; acresValue: string } }): Promise<{ lotSqft?: number; zone?: string } | null> {
+async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number, lotField?: { name: string; unit: "sqft" | "acres"; unitField?: { name: string; acresValue: string } }, op?: "identify"): Promise<{ lotSqft?: number; zone?: string } | null> {
   const diag = (msg: string, extra?: unknown) => {
     // eslint-disable-next-line no-console
     console.info("[Pencil] parcel lookup:", msg, extra ?? "");
@@ -1347,7 +1354,7 @@ async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number, 
     for (const svcUrl of services.slice(0, 4)) {
       try {
         let layerUrls: string[];
-        if (directLayer) {
+        if (op === "identify" || directLayer) {
           layerUrls = [svcUrl];
         } else {
           const meta = (await getJson(`${svcUrl}?f=json`)) as { layers?: { id: number; name: string }[] };
@@ -1359,19 +1366,32 @@ async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number, 
           layerUrls = cand.map((l) => `${svcUrl}/${l.id}`);
         }
         for (const layerUrl of layerUrls) {
-        const q = new URLSearchParams({
-          geometry: `${lng},${lat}`,
-          geometryType: "esriGeometryPoint",
-          inSR: "4326",
-          spatialRel: "esriSpatialRelIntersects",
-          outFields: "*",
-          returnGeometry: "true",
-          outSR: "3857",
-          f: "json",
-        });
-        const data = (await getJson(`${layerUrl}/query?${q}`)) as {
-          features?: { attributes?: Record<string, unknown>; geometry?: { rings?: number[][][] } }[];
-        };
+        let data: { features?: { attributes?: Record<string, unknown>; geometry?: { rings?: number[][][] } }[] };
+        if (op === "identify") {
+          // Query is disabled on this server — identify at the service root.
+          // num() coerces identify's stringified numbers, so the same probes
+          // below work unchanged (no geometry → shoelace fallback skipped).
+          const d = 0.002;
+          const idq =
+            `geometry=${lng},${lat}&geometryType=esriGeometryPoint&sr=4326&layers=all&tolerance=2` +
+            `&mapExtent=${lng - d},${lat - d},${lng + d},${lat + d}&imageDisplay=400,400,96&returnGeometry=false&f=json`;
+          const id = (await getJson(`${svcUrl}/identify?${idq}`)) as { results?: { attributes?: Record<string, unknown> }[] };
+          data = { features: (id.results ?? []).map((r) => ({ attributes: r.attributes })) };
+        } else {
+          const q = new URLSearchParams({
+            geometry: `${lng},${lat}`,
+            geometryType: "esriGeometryPoint",
+            inSR: "4326",
+            spatialRel: "esriSpatialRelIntersects",
+            outFields: "*",
+            returnGeometry: "true",
+            outSR: "3857",
+            f: "json",
+          });
+          data = (await getJson(`${layerUrl}/query?${q}`)) as {
+            features?: { attributes?: Record<string, unknown>; geometry?: { rings?: number[][][] } }[];
+          };
+        }
         const feat = data.features?.[0];
         if (!feat?.attributes) { diag("no parcel at point", layerUrl); continue; }
         let lotSqft: number | undefined;
@@ -1462,7 +1482,7 @@ export async function parcelAtAddress(
   if (!src) return null;
   if (src.kind === "arcgis") {
     if (lat == null || lng == null) return null;
-    const hit = await arcgisParcelAtPoint(src.url, lat, lng, src.lotField);
+    const hit = await arcgisParcelAtPoint(src.url, lat, lng, src.lotField, src.op);
     return hit ? { ...hit, source: src.source } : null;
   }
   try {
