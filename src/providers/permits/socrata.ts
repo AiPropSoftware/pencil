@@ -415,7 +415,7 @@ function normalizeRows(src: CitySource, rows: Record<string, unknown>[], url: st
       approvedDate: issued || "—",
       estValue,
       pricePerSqft,
-      description: `${type} new-construction permit — real public record${valuation > 0 ? ` · declared valuation $${valuation.toLocaleString("en-US")}` : ""}.`,
+      description: `${type} new-construction permit — real public record.`,
       sqftEstimated: !hasRealSqft,
     });
   }

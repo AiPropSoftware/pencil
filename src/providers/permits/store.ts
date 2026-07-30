@@ -49,7 +49,7 @@ export async function fetchStoredPermits(): Promise<Development[]> {
         approvedDate: r.approved_date ?? "—",
         estValue: r.est_value ?? 0,
         pricePerSqft: r.price_per_sqft ?? 0,
-        description: r.description || "New-construction permit — real public record (stored copy).",
+        description: (r.description || "New-construction permit — real public record.").replace(/ · declared valuation \$[\d,]+/, ""),
         sqftEstimated: r.sqft_estimated,
       });
     }
