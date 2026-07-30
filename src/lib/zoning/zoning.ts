@@ -366,7 +366,9 @@ export const CITY_ZONING: Record<string, CityZoning> = {
   Dallas: {
     state: "TX",
     // City GIS zoning service (base-zoning layer self-discovered).
-    gisServer: "https://gis.dallascityhall.com/wwwgis/rest/services/Sdc_public/Zoning/MapServer",
+    // Moved from gis.dallascityhall.com/wwwgis (404 since ~2026) to the
+    // enterprise GIS host — caught by the daily data canary.
+    gisServer: "https://egis.dallascityhall.com/arcgis/rest/services/Sdc_public/Zoning/MapServer",
     codeUrl: "https://codelibrary.amlegal.com/codes/dallas/latest/dallas_tx/0-0-0-28247",
     codeName: "Dallas Development Code ch. 51A (§ 51A-4.110 residential districts)",
     zones: [
