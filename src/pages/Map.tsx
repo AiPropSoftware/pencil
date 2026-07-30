@@ -992,10 +992,31 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
                     : env.units <= 4 ? "Fourplex"
                     : "Small multi";
                   const mkt = ppsfSummary(res.city);
+                  // Accuracy gate: dollar outputs render ONLY when the sale
+                  // $/sf is real (recorded deeds or calibration to published
+                  // city medians). A modeled guess never becomes an on-screen
+                  // dollar figure — the user enters their own instead.
+                  const verifiedMarket = mkt.source === "recorded" || mkt.source === "calibrated";
+                  if (!verifiedMarket) {
+                    const bareHref = `/deal-analyzer?totalSqft=${env.buildableSqft}&mode=sell&productType=${encodeURIComponent(pfType)}&address=${encodeURIComponent(res.formatted)}`;
+                    return (
+                      <div className="rounded-md border border-border bg-card p-4">
+                        <div className="stat-label flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-gold" /> Instant pro forma</div>
+                        <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
+                          Pencil doesn't have verified sale comps for {res.city} yet, and it won't guess
+                          your sale price. Your build envelope ({fmtNumber(env.buildableSqft!)} sf {pfType})
+                          carries into the full pro forma — set the sale $/sf from comps you trust.
+                        </p>
+                        <Button variant="gold" className="mt-3 w-full" asChild>
+                          <Link to={bareHref}>Open the full pro forma <ArrowRight className="h-4 w-4" /></Link>
+                        </Button>
+                      </div>
+                    );
+                  }
                   const opp = scoreOpportunity({ city: res.city, type: pfType, buildableSqft: env.buildableSqft!, areaPpsf: mkt.current });
                   const srcLabel = mkt.source === "recorded"
                     ? `recorded sales${mkt.liveSamples ? ` (${mkt.liveSamples} deeds)` : ""}`
-                    : mkt.source === "calibrated" ? "calibrated to published city medians" : "modeled — verify with local comps";
+                    : "calibrated to published city medians";
                   const analyzerHref = `/deal-analyzer?arv=${opp.arv}&costPerSqft=${opp.buildPpsf}&totalSqft=${env.buildableSqft}&mode=sell&productType=${encodeURIComponent(pfType)}&address=${encodeURIComponent(res.formatted)}`;
                   return (
                     <div className="rounded-md border border-gold/40 bg-card p-4">
