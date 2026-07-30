@@ -548,7 +548,8 @@ export function normalize(src: ArcgisCitySource, data: ArcgisResponse): { items:
       const bp = valuation / sqftRaw;
       if (bp >= 60 && bp <= 1500) ppsfSamples.push(bp);
     }
-    const issued = firstDate(attrs, /issue|approv|final|date/i);
+    // "_dat\b" catches truncated field names like Chattanooga's PERMIT_DAT.
+    const issued = firstDate(attrs, /issue|approv|final|date|_dat\b/i);
     const address = firstString(attrs, /address|location|site/i);
     const contractor = firstString(attrs, /contractor|applicant|company|builder/i);
     const permitId = firstString(attrs, /permit.*(no|num|id)|process.*num|^objectid$/i) || key;
