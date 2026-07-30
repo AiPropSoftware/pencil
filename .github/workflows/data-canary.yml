@@ -1,0 +1,115 @@
+# Daily health check of every live data source Pencil depends on, plus the
+# Austin zoning pilot's live end-to-end verification. Runs on GitHub-hosted
+# runners (open egress). On breakage it fails the run (GitHub emails the repo
+# owner) and files/updates a "data-canary" issue; drift warnings file the
+# issue without failing. Trigger manually from the Actions tab (or API) via
+# workflow_dispatch.
+name: Data canary
+
+on:
+  schedule:
+    - cron: "30 11 * * *" # daily ~6:30am Central
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Probe live data sources
+        id: sources
+        continue-on-error: true
+        run: node scripts/data-canary.mjs
+
+      - name: Set up Python for zoning pilot
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Austin live verification (zoning pilot end-to-end)
+        id: pilot
+        continue-on-error: true
+        working-directory: zoning
+        run: |
+          python -m pip install --quiet -r requirements-dev.txt
+          PENCIL_LIVE_TESTS=1 python -m pytest -q 2>&1 | tee ../pilot-live.log
+
+      - name: Upload canary report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-report
+          path: |
+            canary-report.json
+            pilot-live.log
+          if-no-files-found: ignore
+
+      - name: File or update the canary issue
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          SOURCES_OUTCOME: ${{ steps.sources.outcome }}
+          PILOT_OUTCOME: ${{ steps.pilot.outcome }}
+        with:
+          script: |
+            const fs = require("fs");
+            const label = "data-canary";
+            let report = null;
+            try { report = JSON.parse(fs.readFileSync("canary-report.json", "utf8")); } catch {}
+            const results = report ? report.results : [];
+            const fails = results.filter(r => r.status === "fail");
+            const warns = results.filter(r => r.status === "warn");
+            const pilotFailed = process.env.PILOT_OUTCOME === "failure";
+            const sourcesCrashed = !report && process.env.SOURCES_OUTCOME === "failure";
+            const broken = fails.length > 0 || pilotFailed || sourcesCrashed;
+            const noteworthy = broken || warns.length > 0;
+
+            // Ensure the label exists (ignore "already exists").
+            try {
+              await github.rest.issues.createLabel({ ...context.repo, name: label, color: "d93f0b", description: "Automated data-source health reports" });
+            } catch {}
+
+            const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, labels: label, state: "open" });
+
+            if (!noteworthy) {
+              for (const issue of open) {
+                await github.rest.issues.createComment({ ...context.repo, issue_number: issue.number, body: "✅ All data-source checks recovered — closing." });
+                await github.rest.issues.update({ ...context.repo, issue_number: issue.number, state: "closed" });
+              }
+              return;
+            }
+
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const line = r => `- ${r.status === "fail" ? "❌" : "⚠️"} **${r.name}** — ${r.detail}`;
+            const body = [
+              `Canary run for ${new Date().toISOString().slice(0, 10)} — [full logs](${runUrl})`,
+              "",
+              sourcesCrashed ? "❌ **Canary script crashed before producing a report — investigate immediately.**" : (report ? report.summary : ""),
+              "",
+              fails.length ? `### Broken sources\n${fails.map(line).join("\n")}` : "",
+              warns.length ? `### Drift warnings (data changed at the source — re-verify)\n${warns.map(line).join("\n")}` : "",
+              pilotFailed ? "### Austin pilot live verification FAILED\nSee the `pilot-live.log` artifact — the address→zone→envelope chain no longer reproduces the verified numbers." : "",
+            ].filter(Boolean).join("\n");
+
+            if (open.length) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: open[0].number, body });
+            } else {
+              await github.rest.issues.create({
+                ...context.repo,
+                title: broken ? "Data canary: source breakage detected" : "Data canary: data drift needs re-verification",
+                labels: [label],
+                body,
+              });
+            }
+
+            if (broken) core.setFailed(`${fails.length} broken source(s)${pilotFailed ? " + pilot verification failure" : ""}${sourcesCrashed ? " (canary crashed)" : ""}`);
