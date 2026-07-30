@@ -23,6 +23,8 @@ jobs:
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
+          # pipefail: without it `| tee` masks a failing ingest as a green run.
+          set -o pipefail
           npx --yes esbuild@0.24.2 scripts/ingest-permits.ts \
             --bundle --platform=node --format=esm --outfile=ingest.mjs \
             "--alias:@=./src" "--define:import.meta.env={}"

@@ -1,0 +1,30 @@
+name: Verify permit store
+
+# Independent read-only audit of the Supabase `permits` table: counts rows,
+# tallies by city, and samples Miami — using the public anon key, exactly as
+# the browser does. Deliberately does not trust the ingest job's own report.
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Query the store
+        run: |
+          set -o pipefail
+          npx --yes esbuild@0.24.2 scripts/verify-store.ts \
+            --bundle --platform=node --format=esm --outfile=verify.mjs
+          node verify.mjs | tee verify-report.txt
+      - name: Publish summary
+        if: always()
+        run: |
+          echo '## Permit store audit' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -c 20000 verify-report.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
