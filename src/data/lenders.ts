@@ -113,14 +113,22 @@ export const HARD_MONEY_LENDERS: Lender[] = [
 ];
 
 /**
- * Lenders for a state — regional specialists that explicitly list the state
- * first (strongest local signal), then the nationwide programs.
+ * Lenders for a state, MOST LOCAL FIRST: a lender covering 7 states that
+ * includes this one is a far stronger local signal than a 33-state program,
+ * which in turn beats "nationwide". Footprint size travels with each result
+ * so the UI can label the locality honestly instead of a flat "Lends in XX".
  */
-export function lendersFor(state: string): Lender[] {
+export interface RankedLender extends Lender {
+  /** Number of states covered (51 = nationwide) — smaller = more local. */
+  footprint: number;
+}
+
+export function lendersFor(state: string): RankedLender[] {
   const s = state.toUpperCase();
-  const regional = HARD_MONEY_LENDERS.filter((l) => l.states !== "nationwide" && l.states.includes(s));
-  const national = HARD_MONEY_LENDERS.filter((l) => l.states === "nationwide");
-  return [...regional, ...national];
+  return HARD_MONEY_LENDERS
+    .filter((l) => l.states === "nationwide" || l.states.includes(s))
+    .map((l) => ({ ...l, footprint: l.states === "nationwide" ? 51 : l.states.length }))
+    .sort((a, b) => a.footprint - b.footprint);
 }
 
 /** Targeted search for local/boutique lenders we don't have in the roster. */
