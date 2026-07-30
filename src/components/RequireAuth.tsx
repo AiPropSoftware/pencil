@@ -50,11 +50,12 @@ export function RequireAuth({ children, requireRole = "free" }: Props) {
         <div className="gold-rule" />
         <h2 className="mt-3 font-display text-3xl">Upgrade to access</h2>
         <p className="mt-3 text-muted-foreground">
-          This module is included with the Pro plan — $149/month, cancel
+          This module is included with the Pro plan — 7-day free trial, no
+          card required, then $149/month, cancel
           anytime. One avoided bad deal pays for it for the next decade.
         </p>
         <div className="mt-6">
-          <UpgradeButton size="lg">Start Pro · $149/mo</UpgradeButton>
+          <UpgradeButton size="lg">Start 7-day free trial</UpgradeButton>
         </div>
       </div>
     );

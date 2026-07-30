@@ -25,6 +25,9 @@ export function Header() {
       <div className="container flex h-14 items-center justify-between">
         <Logo />
         <div className="flex items-center gap-3">
+          <Button size="sm" variant="ghost" asChild>
+            <Link to="/pricing">Pricing</Link>
+          </Button>
           {user ? (
             <>
               <Button size="sm" variant="gold" asChild>
