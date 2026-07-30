@@ -24,6 +24,12 @@ export interface ArcgisCitySource {
   lat: number;
   lng: number;
   limit?: number;
+  /**
+   * The layer itself is scoped to new-residential permits (its service
+   * definition says so), so rows without descriptive text fields must not be
+   * dropped by the residential/new keyword filter — only obvious remodels.
+   */
+  residentialNewOnly?: boolean;
 }
 
 export const ARCGIS_SOURCES: ArcgisCitySource[] = [
@@ -51,9 +57,12 @@ export const ARCGIS_SOURCES: ArcgisCitySource[] = [
     city: "Nashville",
     state: "TN",
     candidates: [
-      "https://maps.nashville.gov/arcgis", // Socrata portal retired — county GIS server
+      // Metro Nashville's hosted "Building Permits Issued" layer (AGOL org
+      // HdTo6HJqh92wn4D8): Permit__, Date_Issued, Contact, Const_Cost, Lat/Lon.
+      // maps.nashville.gov root is dead — do not re-add it.
+      "https://services2.arcgis.com/HdTo6HJqh92wn4D8/arcgis/rest/services/Building_Permits_Issued_2/FeatureServer/0",
     ],
-    metroPpsf: 420,
+    metroPpsf: 276,
     lat: 36.16,
     lng: -86.78,
     limit: 3000,
@@ -74,33 +83,28 @@ export const ARCGIS_SOURCES: ArcgisCitySource[] = [
     city: "Denver",
     state: "CO",
     candidates: [
-      "https://gis.denvergov.org/arcgis",
-      "https://maps.denvergov.org/arcgis",
+      // Open Data Catalog residential-construction-permit layer: PERMIT_NUM,
+      // DATE_ISSUED, CONTRACTOR_NAME, VALUATION, UNITS; location is
+      // geometry-only (outSR=4326 handles the reprojection).
+      "https://services1.arcgis.com/zdB7qR0BtYrg0Xpl/arcgis/rest/services/ODC_DEV_RESIDENTIALCONSTPERMIT_P/FeatureServer/316",
     ],
-    metroPpsf: 520,
+    metroPpsf: 354,
     lat: 39.74,
     lng: -104.99,
     limit: 3000,
-  },
-  {
-    city: "Phoenix",
-    state: "AZ",
-    candidates: [
-      "https://maps.phoenix.gov/arcgis",
-    ],
-    metroPpsf: 360,
-    lat: 33.45,
-    lng: -112.07,
-    limit: 3000,
+    residentialNewOnly: true,
   },
   {
     city: "Houston",
     state: "TX",
     candidates: [
-      "https://mycity.houstontx.gov/arcgis",
-      "https://mycity.houstontx.gov/pubgis01",
+      // City of Houston publishes no confirmed open permit feed; the COH layer
+      // is a best-effort guess and Harris County covers unincorporated areas
+      // (PERMITNUMBER, ISSUEDDATE, APPLICANTNAME). mycity.houstontx.gov is dead.
+      "https://services.arcgis.com/su8ic9KbA7PYVxPS/arcgis/rest/services/COH_BUILDING_PERMITS/FeatureServer/0",
+      "https://www.gis.hctx.net/arcgishcpid/rest/services/Permits/IssuedPermits/FeatureServer/0",
     ],
-    metroPpsf: 320,
+    metroPpsf: 179,
     lat: 29.76,
     lng: -95.37,
     limit: 3000,
@@ -109,11 +113,158 @@ export const ARCGIS_SOURCES: ArcgisCitySource[] = [
     city: "Portland",
     state: "OR",
     candidates: [
-      "https://www.portlandmaps.com/arcgis",
+      // BDS permit layer (APPLICATION, ISSUED epoch-ms, FINALVALUATION).
+      // Server 403s non-browser user agents — fine in-app, expect it in CI.
+      "https://www.portlandmaps.com/arcgis/rest/services/Public/BDS_Permit/FeatureServer/22",
     ],
-    metroPpsf: 560,
+    metroPpsf: 321,
     lat: 45.51,
     lng: -122.68,
+    limit: 3000,
+  },
+  {
+    city: "Washington",
+    state: "DC",
+    candidates: [
+      // DCRA feeds: /18 = permits issued 2026 (current-year layer), /4 =
+      // rolling 30 days. Source is wkid 26985 (MD state plane) — outSR=4326.
+      "https://maps2.dcgis.dc.gov/dcgis/rest/services/FEEDS/DCRA/FeatureServer/18",
+      "https://maps2.dcgis.dc.gov/dcgis/rest/services/FEEDS/DCRA/FeatureServer/4",
+    ],
+    metroPpsf: 480,
+    lat: 38.90,
+    lng: -77.03,
+    limit: 3000,
+  },
+  {
+    city: "Baltimore",
+    state: "MD",
+    candidates: [
+      // DHCD Open Baltimore layer 3 = building permits (CaseNumber,
+      // IssuedDate; no contractor/valuation fields published).
+      "https://egisdata.baltimorecity.gov/egis/rest/services/Housing/DHCD_Open_Baltimore_Datasets/FeatureServer/3",
+      "https://baltegis.baltimorecity.gov/egis/rest/services/Housing/DHCD_Open_Baltimore_Datasets/FeatureServer/3",
+    ],
+    metroPpsf: 156,
+    lat: 39.29,
+    lng: -76.61,
+    limit: 3000,
+  },
+  {
+    city: "Sacramento",
+    state: "CA",
+    candidates: [
+      // City current-year issued permits (Application, Contractor, Valuation);
+      // county layer as fallback coverage.
+      "https://services5.arcgis.com/54falWtcpty3V47Z/arcgis/rest/services/BldgPermitIssued_CurrentYear/FeatureServer/0",
+      "https://services1.arcgis.com/5NARefyPVtAeuJPU/arcgis/rest/services/Permits/FeatureServer/0",
+    ],
+    metroPpsf: 330,
+    lat: 38.58,
+    lng: -121.49,
+    limit: 3000,
+  },
+  {
+    city: "Boise",
+    state: "ID",
+    candidates: [
+      // Housing_OpenData is new-residential-only by definition (IssuedDate).
+      "https://services1.arcgis.com/WHM6qC35aMtyAAlN/arcgis/rest/services/Housing_OpenData/FeatureServer/0",
+    ],
+    metroPpsf: 335,
+    lat: 43.62,
+    lng: -116.20,
+    limit: 3000,
+    residentialNewOnly: true,
+  },
+  {
+    city: "Minneapolis",
+    state: "MN",
+    candidates: [
+      // CCS_Permits: permitNumber, issueDate, applicantName, value, Lat/Lon.
+      "https://services.arcgis.com/afSMGVsC7QlRK1kZ/arcgis/rest/services/CCS_Permits/FeatureServer/0",
+    ],
+    metroPpsf: 246,
+    lat: 44.98,
+    lng: -93.27,
+    limit: 3000,
+  },
+  {
+    city: "Detroit",
+    state: "MI",
+    candidates: [
+      // BSEED building permits: record_id, issued_date,
+      // amt_estimated_contractor_cost.
+      "https://services2.arcgis.com/qvkbeam7Wirps6zC/arcgis/rest/services/bseed_building_permits/FeatureServer/0",
+    ],
+    metroPpsf: 77,
+    lat: 42.33,
+    lng: -83.05,
+    limit: 3000,
+  },
+  {
+    city: "Columbus",
+    state: "OH",
+    candidates: [
+      // Accela extract: B1_ALT_ID, ISSUED_DT, APPLICANT_BUS_NAME, G3_VALUE_TTL.
+      "https://services1.arcgis.com/9yy6msODkIBzkUXU/arcgis/rest/services/Building_Permits/FeatureServer/0",
+    ],
+    metroPpsf: 183,
+    lat: 39.96,
+    lng: -83.00,
+    limit: 3000,
+  },
+  {
+    city: "Atlanta",
+    state: "GA",
+    candidates: [
+      // AMS building permits layer 66: RECORD_ID, DATE_OPENED, JOB_VALUE,
+      // Latitude/Longitude; "latest" layer as fallback.
+      "https://services5.arcgis.com/5RxyIIJ9boPdptdo/arcgis/rest/services/AMS_BuildingPermits/FeatureServer/66",
+      "https://services5.arcgis.com/5RxyIIJ9boPdptdo/arcgis/rest/services/Building_Permit_latest/FeatureServer/0",
+    ],
+    metroPpsf: 242,
+    lat: 33.75,
+    lng: -84.39,
+    limit: 3000,
+  },
+  {
+    city: "Charlotte",
+    state: "NC",
+    candidates: [
+      // Mecklenburg County (covers Charlotte): permitnum, issuedate, bldgcost,
+      // totalsqft; location is geometry-only.
+      "https://meckgis.mecklenburgcountync.gov/server/rest/services/BuildingPermits/FeatureServer/0",
+    ],
+    metroPpsf: 228,
+    lat: 35.23,
+    lng: -80.84,
+    limit: 3000,
+  },
+  {
+    city: "Raleigh",
+    state: "NC",
+    candidates: [
+      // Full history layer: permitnum, issueddate, contractorcompanyname,
+      // estprojectcost, totalsqft; rolling windows as fallbacks.
+      "https://services.arcgis.com/v400IkDOw1ad7Yad/arcgis/rest/services/Building_Permits/FeatureServer/0",
+      "https://services.arcgis.com/v400IkDOw1ad7Yad/arcgis/rest/services/Building_Permits_Issued_Past_180_Days/FeatureServer/0",
+    ],
+    metroPpsf: 233,
+    lat: 35.78,
+    lng: -78.64,
+    limit: 3000,
+  },
+  {
+    city: "Tampa",
+    state: "FL",
+    candidates: [
+      // Planning/PermitsAll (CREATEDDATE; low volume, no contractor field).
+      "https://arcgis.tampagov.net/arcgis/rest/services/Planning/PermitsAll/MapServer/0",
+    ],
+    metroPpsf: 300,
+    lat: 27.95,
+    lng: -82.46,
     limit: 3000,
   },
 ];
@@ -265,8 +416,16 @@ async function queryLayer(layerUrl: string, limit: number): Promise<{ data: Arcg
     orderByFields: "OBJECTID DESC",
   });
   const url = `${layerUrl}/query?${params.toString()}`;
-  const data = (await getJson(url)) as ArcgisResponse;
-  if (data.error) throw new Error(`ArcGIS ${data.error.code ?? ""}: ${data.error.message ?? "error"}`);
+  let data = (await getJson(url)) as ArcgisResponse;
+  if (data.error) {
+    // Hosted layers whose OID field isn't literally OBJECTID (FID, ESRI_OID…)
+    // reject the orderBy — retry unordered rather than losing the whole city.
+    params.delete("orderByFields");
+    const retryUrl = `${layerUrl}/query?${params.toString()}`;
+    data = (await getJson(retryUrl)) as ArcgisResponse;
+    if (data.error) throw new Error(`ArcGIS ${data.error.code ?? ""}: ${data.error.message ?? "error"}`);
+    return { data, url: retryUrl };
+  }
   return { data, url };
 }
 
@@ -290,7 +449,10 @@ function normalize(src: ArcgisCitySource, data: ArcgisResponse): { items: Develo
     const isResidential = /resid|family|duplex|town|apartment|condo|dwelling|sfr/i.test(blob);
     const isNew = /new construction|new building|new dwelling|\bnew\b/i.test(blob);
     const isRemodel = /remodel|repair|addition|alteration|demo|interior|reroof|roof|mechanic|electric|plumb|hvac|pool|fence|sign|solar|shutter|awning|revision/i.test(blob);
-    if (!isResidential || !isNew || isRemodel) continue;
+    if (isRemodel) continue;
+    // Layers scoped to new-residential by definition keep rows even when the
+    // record carries no descriptive text for the keyword filter to see.
+    if (!src.residentialNewOnly && (!isResidential || !isNew)) continue;
 
     const key = `${coords.lat.toFixed(5)},${coords.lng.toFixed(5)}`;
     if (seen.has(key)) continue;

@@ -28,8 +28,8 @@ const pick = (row: Record<string, unknown>, keys: string[]): unknown => {
 
 /** Extract coordinates from the many shapes Socrata datasets use. */
 function coordsFrom(row: Record<string, unknown>): { lat: number; lng: number } | null {
-  const lat = num(pick(row, ["latitude", "lat", "gis_latitude", "y_coordinate", "y"]));
-  const lng = num(pick(row, ["longitude", "long", "lng", "gis_longitude", "x_coordinate", "x"]));
+  const lat = num(pick(row, ["latitude", "lat", "gis_latitude", "y_coordinate", "y", "y_latitude", "Y_COORD", "Latitude"]));
+  const lng = num(pick(row, ["longitude", "long", "lng", "gis_longitude", "x_coordinate", "x", "x_longitude", "X_COORD", "Longitude"]));
   if (Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0) return { lat, lng };
 
   for (const key of ["location", "mapped_location", "location_1", "the_geom", "geocoded_column", "point", "geolocation"]) {
@@ -75,7 +75,12 @@ export interface CitySource {
   metroPpsf: number;    // sale $/sqft used for value estimates
   lat: number;          // city center, for coordinate sanity checks
   lng: number;
-  limit?: number;       // rows to fetch (default 2500)
+  limit?: number;
+  /** Portal type — plain Socrata SODA by default; ckan = CKAN datastore_search
+   * endpoint (Boston, Pittsburgh/WPRDC…), carto = Carto SQL API (Philadelphia). */
+  kind?: "socrata" | "ckan" | "carto";
+  /** carto only: SQL with a {limit} placeholder. */
+  cartoQuery?: string;
   where?: string;       // optional SoQL filter to boost new-construction yield
 }
 
@@ -97,6 +102,36 @@ export const CITY_SOURCES: CitySource[] = [
   { city: "Fort Worth", state: "TX", url: "https://data.fortworthtexas.gov/resource/quz7-xnsy.json", metroPpsf: 210, lat: 32.75, lng: -97.33, limit: 5000 },
   // Dallas OpenData "Building Permits" (official, Socrata): dallasopendata.com/Services/Building-Permits/e7gq-4sah
   { city: "Dallas", state: "TX", url: "https://www.dallasopendata.com/resource/e7gq-4sah.json", metroPpsf: 310, lat: 32.78, lng: -96.80, limit: 6000 },
+
+  // ---- 2026 coverage expansion — every endpoint below was research-verified
+  // ---- against indexed portal pages / working code, and is re-verified daily
+  // ---- by the data canary. $/sf figures are metro median-sale (Redfin) —
+  // ---- market anchors, not new-construction quotes.
+  // New Orleans "Permits - BLDS" — BLDS-standard schema, native field match.
+  { city: "New Orleans", state: "LA", url: "https://data.nola.gov/resource/72f9-bi28.json", metroPpsf: 210, lat: 29.95, lng: -90.07, limit: 5000 },
+  // Kansas City "Permits - Core Dataset" (BLDS via CompassKC, daily).
+  { city: "Kansas City", state: "MO", url: "https://data.kcmo.org/resource/ue52-x8g8.json", metroPpsf: 175, lat: 39.10, lng: -94.58, limit: 5000 },
+  // Orlando "Permit Applications" — contractor_name + geocoded_column.
+  { city: "Orlando", state: "FL", url: "https://data.cityoforlando.net/resource/ryhf-m453.json", metroPpsf: 250, lat: 28.54, lng: -81.38, limit: 6000 },
+  // Boston "Approved Building Permits" (Analyze Boston, CKAN datastore).
+  { city: "Boston", state: "MA", kind: "ckan", url: "https://data.boston.gov/api/3/action/datastore_search?resource_id=6ddcd912-32a0-43df-9908-63574f8c7e77", metroPpsf: 695, lat: 42.36, lng: -71.06, limit: 5000 },
+  // Pittsburgh "PLI Permits" (WPRDC CKAN) — contractor_name populated.
+  { city: "Pittsburgh", state: "PA", kind: "ckan", url: "https://data.wprdc.org/api/3/action/datastore_search?resource_id=f4d1177a-f597-4c32-8cbf-7885f56253f6", metroPpsf: 203, lat: 40.44, lng: -79.99, limit: 5000 },
+  // San Jose "Active Building Permits" (CKAN) — CONTRACTOR + PERMITVALUATION.
+  { city: "San Jose", state: "CA", kind: "ckan", url: "https://data.sanjoseca.gov/api/3/action/datastore_search?resource_id=761b7ae8-3be1-4ad6-923d-c7af6404a904", metroPpsf: 889, lat: 37.34, lng: -121.89, limit: 5000 },
+  // San Antonio "PERMITS ISSUED" (CKAN) — mixed-SRS coords are dropped by the
+  // city-center sanity check, WGS84 rows pin correctly.
+  { city: "San Antonio", state: "TX", kind: "ckan", url: "https://data.sanantonio.gov/api/3/action/datastore_search?resource_id=c21106f9-3ef5-4f3a-8604-f992b4db7512", metroPpsf: 157, lat: 29.42, lng: -98.49, limit: 5000 },
+  // Milwaukee residential+commercial permit work (CKAN; no coords in schema —
+  // rides the list views until the city publishes locations).
+  { city: "Milwaukee", state: "WI", kind: "ckan", url: "https://data.milwaukee.gov/api/3/action/datastore_search?resource_id=828e9630-d7cb-42e4-960e-964eae916397", metroPpsf: 201, lat: 43.04, lng: -87.91, limit: 4000 },
+  // Philadelphia L&I permits (Carto SQL API) — current eCLIPSE "permits" table.
+  {
+    city: "Philadelphia", state: "PA", kind: "carto",
+    url: "https://phl.carto.com/api/v2/sql",
+    cartoQuery: "SELECT *, ST_Y(the_geom) AS latitude, ST_X(the_geom) AS longitude FROM permits WHERE permitissuedate IS NOT NULL ORDER BY permitissuedate DESC LIMIT {limit}",
+    metroPpsf: 198, lat: 39.95, lng: -75.17, limit: 5000,
+  },
 ];
 
 export const AUSTIN = CITY_SOURCES[0];
@@ -115,6 +150,39 @@ export interface CityResult {
 
 export async function fetchCityDevelopments(src: CitySource, limitOverride?: number): Promise<CityResult> {
   const limit = limitOverride ?? src.limit ?? 2500;
+
+  // CKAN + Carto portals: different envelopes, same row shape — rows feed the
+  // exact same normalizer below.
+  if (src.kind === "ckan" || src.kind === "carto") {
+    let url = src.url;
+    try {
+      let rows: Record<string, unknown>[] = [];
+      if (src.kind === "ckan") {
+        // datastore_search: {result: {records: [...]}}. Newest-first via
+        // _id desc where supported; fall back to the plain query.
+        url = `${src.url}&limit=${limit}&sort=_id desc`;
+        let res = await fetch(url, { headers: { Accept: "application/json" } });
+        if (!res.ok) {
+          url = `${src.url}&limit=${limit}`;
+          res = await fetch(url, { headers: { Accept: "application/json" } });
+        }
+        if (!res.ok) return { city: src.city, items: [], total: 0, columns: [], url, buildPpsfSamples: 0, error: `HTTP ${res.status}` };
+        const data = await res.json();
+        rows = (data?.result?.records ?? []) as Record<string, unknown>[];
+      } else {
+        const q = (src.cartoQuery ?? "").replace("{limit}", String(limit));
+        url = `${src.url}?q=${encodeURIComponent(q)}`;
+        const res = await fetch(url, { headers: { Accept: "application/json" } });
+        if (!res.ok) return { city: src.city, items: [], total: 0, columns: [], url, buildPpsfSamples: 0, error: `HTTP ${res.status}` };
+        const data = await res.json();
+        rows = (data?.rows ?? []) as Record<string, unknown>[];
+      }
+      return normalizeRows(src, rows, url);
+    } catch (e) {
+      return { city: src.city, items: [], total: 0, columns: [], url, buildPpsfSamples: 0, error: `${(e as Error).message} — likely CORS or network block` };
+    }
+  }
+
   const base = new URLSearchParams();
   base.set("$limit", String(limit));
   const token = import.meta.env.VITE_SOCRATA_APP_TOKEN as string | undefined;
@@ -155,6 +223,11 @@ export async function fetchCityDevelopments(src: CitySource, limitOverride?: num
     return { city: src.city, items: [], total: 0, columns: [], url, buildPpsfSamples: 0, error: `${(e as Error).message} — likely CORS or network block` };
   }
 
+  return normalizeRows(src, rows, url);
+}
+
+/** Shared row normalizer — Socrata, CKAN, and Carto rows all land here. */
+function normalizeRows(src: CitySource, rows: Record<string, unknown>[], url: string): CityResult {
   const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
   const seen = new Set<string>();
   const out: Development[] = [];
@@ -172,8 +245,8 @@ export async function fetchCityDevelopments(src: CitySource, limitOverride?: num
 
     const typeDesc = String(pick(r, ["permit_type_desc", "permit_type", "permittype", "permit_type_definition", "permittypedesc", "permit_type_description"]) ?? "");
     const pclass = String(pick(r, ["permit_class", "permit_class_mapped", "permitclass", "permitclassmapped"]) ?? "");
-    const work = String(pick(r, ["work_class", "work_type", "job_type", "worktype"]) ?? "");
-    const desc = String(pick(r, ["description", "work_description", "purpose", "job_description", "proposed_use"]) ?? "");
+    const work = String(pick(r, ["work_class", "work_type", "job_type", "worktype", "typeofwork", "WORK TYPE", "Permit Type"]) ?? "");
+    const desc = String(pick(r, ["description", "work_description", "purpose", "job_description", "proposed_use", "permitdescription", "approvedscopeofwork", "WORKDESCRIPTION", "PROJECT NAME"]) ?? "");
     const blob = `${typeDesc} ${pclass} ${work} ${desc}`;
     const residentialFlag = String(pick(r, ["residential"]) ?? "").toLowerCase();
 
@@ -192,28 +265,28 @@ export async function fetchCityDevelopments(src: CitySource, limitOverride?: num
 
     const type = productTypeFrom(blob);
     const units = Math.max(1, Math.round(num(pick(r, ["housing_units", "housingunitsadded", "number_of_dwelling_units", "total_dwelling_units", "proposed_units", "dwelling_units"])) || UNITS_BY_TYPE[type]));
-    const sqftRaw = num(pick(r, ["total_new_add_sqft", "building_sqft", "square_feet", "proposed_sqft"]));
+    const sqftRaw = num(pick(r, ["total_new_add_sqft", "building_sqft", "square_feet", "proposed_sqft", "sq_feet", "totalsqft", "AREA (SF)"]));
     const hasRealSqft = Number.isFinite(sqftRaw) && sqftRaw > 200;
     const buildingSqft = Math.round(hasRealSqft ? sqftRaw : units * 1600);
-    const valuation = Math.round(num(pick(r, ["total_job_valuation", "total_valuation", "building_valuation", "declared_valuation", "estimated_cost", "revised_cost", "reported_cost", "estprojectcost", "const_cost", "initial_cost", "job_cost"])) || 0);
+    const valuation = Math.round(num(pick(r, ["total_job_valuation", "total_valuation", "building_valuation", "declared_valuation", "estimated_cost", "revised_cost", "reported_cost", "estprojectcost", "const_cost", "initial_cost", "job_cost", "total_project_value", "PERMITVALUATION", "DECLARED VALUATION", "Construction Total Cost"])) || 0);
 
     // Real build-cost sample: declared valuation ÷ real sqft, sanity-bounded.
     if (valuation > 0 && hasRealSqft) {
       const bp = valuation / sqftRaw;
       if (bp >= 60 && bp <= 1500) ppsfSamples.push(bp);
     }
-    const issued = String(pick(r, ["issued_date", "issue_date", "issueddate", "date_issued", "issuance_date", "applied_date", "applieddate", "filing_date", "permit_issue_date"]) ?? "").slice(0, 10);
+    const issued = String(pick(r, ["issued_date", "issue_date", "issueddate", "date_issued", "issuance_date", "applied_date", "applieddate", "filing_date", "permit_issue_date", "permitissuedate", "processed_date", "ISSUEDATE", "DATE ISSUED", "Date Issued"]) ?? "").slice(0, 10);
 
-    let address = String(pick(r, ["original_address1", "address", "street_address", "permit_location", "project_name", "originaladdress1"]) ?? "").trim();
+    let address = String(pick(r, ["original_address1", "address", "street_address", "permit_location", "project_name", "originaladdress1", "permit_address", "ADDRESS", "Address", "gx_location"]) ?? "").trim();
     if (!address) {
       const houseNo = String(pick(r, ["house__", "house_no", "house_number", "street_number"]) ?? "").trim();
       const street = String(pick(r, ["street_name", "street"]) ?? "").trim();
       if (street) address = `${houseNo} ${street}`.trim();
     }
 
-    const contractor = String(pick(r, ["contractor_company_name", "contractorcompanyname", "contractor_name", "general_contractor", "applicant_organization", "contractor_full_name", "applicant_full_name", "contact_1_name"]) ?? "").trim();
-    const status = statusFrom(String(pick(r, ["status_current", "statuscurrent", "permit_status", "status", "current_status", "status_description"]) ?? ""));
-    const permitId = String(pick(r, ["permit_number", "permit_num", "permit_", "job__", "row_id", ":id"]) ?? key);
+    const contractor = String(pick(r, ["contractor_company_name", "contractorcompanyname", "contractor_name", "contractorname", "general_contractor", "applicant_organization", "contractor_full_name", "applicant_full_name", "contact_1_name", "CONTRACTOR", "PRIMARY CONTACT", "applicant"]) ?? "").trim();
+    const status = statusFrom(String(pick(r, ["status_current", "statuscurrent", "permit_status", "status", "current_status", "status_description", "application_status", "Status", "APPROVAL_STATUS"]) ?? ""));
+    const permitId = String(pick(r, ["permit_number", "permit_num", "permit_", "permitnumber", "permit_id", "job__", "FOLDERNUMBER", "PERMIT #", "Record ID", "row_id", ":id"]) ?? key);
 
     const estValue = valuation > 0 ? Math.max(valuation, Math.round(buildingSqft * src.metroPpsf * 0.5)) : Math.round(buildingSqft * src.metroPpsf);
     const pricePerSqft = valuation > 0 && buildingSqft > 0

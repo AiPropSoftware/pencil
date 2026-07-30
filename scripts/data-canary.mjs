@@ -28,7 +28,7 @@ function record(status, name, detail) {
   console.log(`${icon} [${status.toUpperCase()}] ${name} — ${detail}`);
 }
 
-async function fetchJson(url, tries = 3) {
+async function fetchJson(url, tries = 3, headers) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
     try {
@@ -36,7 +36,7 @@ async function fetchJson(url, tries = 3) {
       const t = setTimeout(() => ctl.abort(), 25_000);
       const res = await fetch(url, {
         signal: ctl.signal,
-        headers: { accept: "application/json", "user-agent": "pencil-data-canary/1.0" },
+        headers: { accept: "application/json", "user-agent": "pencil-data-canary/1.0", ...(headers || {}) },
       });
       clearTimeout(t);
       const text = await res.text();
@@ -161,6 +161,9 @@ const CHECKS = [
     ["New York", "https://data.cityofnewyork.us/resource/ipu4-2q9a.json"],
     ["Los Angeles", "https://data.lacity.org/resource/pi9x-tg5x.json"],
     ["Dallas", "https://www.dallasopendata.com/resource/e7gq-4sah.json"],
+    ["New Orleans", "https://data.nola.gov/resource/72f9-bi28.json"],
+    ["Kansas City", "https://data.kcmo.org/resource/ue52-x8g8.json"],
+    ["Orlando", "https://data.cityoforlando.net/resource/ryhf-m453.json"],
   ].map(([city, url]) => ({
     name: `${city} permit feed`,
     async run() {
@@ -190,24 +193,162 @@ const CHECKS = [
       return `${rows.length} rows, newest ${newest ? new Date(newest).toISOString().slice(0, 10) : "n/a"}`;
     },
   })),
-  {
-    name: "Miami permit feed (City of Miami Building_Permits_Since_2014)",
-    async run() {
+  // ArcGIS-hosted permit-record layers: [city, layer URL, fields that must
+  // exist, opts]. Same recency policy as the Socrata feeds (warn-only).
+  // Field names come from each layer's live schema at research time — a
+  // missing field here means the city changed the schema under the app.
+  ...[
+    [
+      "Miami",
       // The old services6/ONZht79c8QWuX759 URL was a false positive (Peel
-      // Region, Ontario — housing-unit aggregates). This is the real City of
-      // Miami org's per-record permits layer.
-      const url =
-        "https://services1.arcgis.com/CvuPhqcTQpZPT9qY/arcgis/rest/services/Building_Permits_Since_2014/FeatureServer/0/query" +
-        "?where=1%3D1&outFields=PermitNumber,CompanyName,IssuedDate,TotalSQFT&resultRecordCount=10&orderByFields=IssuedDate%20DESC&returnGeometry=false&f=json";
-      const data = await fetchJson(url);
+      // Region, Ontario). CvuPhqcTQpZPT9qY is the real City of Miami org.
+      "https://services1.arcgis.com/CvuPhqcTQpZPT9qY/arcgis/rest/services/Building_Permits_Since_2014/FeatureServer/0",
+      ["PermitNumber", "CompanyName"],
+    ],
+    [
+      "Nashville",
+      "https://services2.arcgis.com/HdTo6HJqh92wn4D8/arcgis/rest/services/Building_Permits_Issued_2/FeatureServer/0",
+      ["Permit__", "Date_Issued"],
+    ],
+    [
+      "Denver",
+      "https://services1.arcgis.com/zdB7qR0BtYrg0Xpl/arcgis/rest/services/ODC_DEV_RESIDENTIALCONSTPERMIT_P/FeatureServer/316",
+      ["PERMIT_NUM", "CONTRACTOR_NAME"],
+    ],
+    [
+      "Portland",
+      // portlandmaps.com 403s non-browser user agents — probe with a browser
+      // UA, the same way the app's in-browser fetch presents itself.
+      "https://www.portlandmaps.com/arcgis/rest/services/Public/BDS_Permit/FeatureServer/22",
+      ["APPLICATION", "ISSUED"],
+      { browserUa: true },
+    ],
+    [
+      "Washington DC",
+      "https://maps2.dcgis.dc.gov/dcgis/rest/services/FEEDS/DCRA/FeatureServer/18",
+      ["PERMIT_ID", "ISSUE_DATE"],
+    ],
+    [
+      "Baltimore",
+      "https://egisdata.baltimorecity.gov/egis/rest/services/Housing/DHCD_Open_Baltimore_Datasets/FeatureServer/3",
+      ["CaseNumber", "IssuedDate"],
+    ],
+    [
+      "Sacramento",
+      "https://services5.arcgis.com/54falWtcpty3V47Z/arcgis/rest/services/BldgPermitIssued_CurrentYear/FeatureServer/0",
+      ["Application", "Contractor"],
+    ],
+    [
+      "Boise",
+      "https://services1.arcgis.com/WHM6qC35aMtyAAlN/arcgis/rest/services/Housing_OpenData/FeatureServer/0",
+      ["IssuedDate"],
+    ],
+    [
+      "Minneapolis",
+      "https://services.arcgis.com/afSMGVsC7QlRK1kZ/arcgis/rest/services/CCS_Permits/FeatureServer/0",
+      ["permitNumber", "applicantName"],
+    ],
+    [
+      "Detroit",
+      "https://services2.arcgis.com/qvkbeam7Wirps6zC/arcgis/rest/services/bseed_building_permits/FeatureServer/0",
+      ["record_id", "issued_date"],
+    ],
+    [
+      "Columbus",
+      "https://services1.arcgis.com/9yy6msODkIBzkUXU/arcgis/rest/services/Building_Permits/FeatureServer/0",
+      ["B1_ALT_ID", "ISSUED_DT"],
+    ],
+    [
+      "Atlanta",
+      "https://services5.arcgis.com/5RxyIIJ9boPdptdo/arcgis/rest/services/AMS_BuildingPermits/FeatureServer/66",
+      ["RECORD_ID", "JOB_VALUE"],
+    ],
+    [
+      "Charlotte",
+      "https://meckgis.mecklenburgcountync.gov/server/rest/services/BuildingPermits/FeatureServer/0",
+      ["permitnum", "bldgcost"],
+    ],
+    [
+      "Raleigh",
+      "https://services.arcgis.com/v400IkDOw1ad7Yad/arcgis/rest/services/Building_Permits/FeatureServer/0",
+      ["permitnum", "contractorcompanyname"],
+    ],
+    [
+      "Tampa",
+      "https://arcgis.tampagov.net/arcgis/rest/services/Planning/PermitsAll/MapServer/0",
+      ["CREATEDDATE"],
+    ],
+    [
+      "Houston (Harris County, unincorporated)",
+      "https://www.gis.hctx.net/arcgishcpid/rest/services/Permits/IssuedPermits/FeatureServer/0",
+      ["PERMITNUMBER", "ISSUEDDATE"],
+    ],
+    [
+      "Houston (COH layer — unverified guess)",
+      // City of Houston publishes no confirmed open feed; the app tries this
+      // guess first, then falls through to Harris County. Warn-only: an
+      // error here is expected until a real COH feed is found.
+      "https://services.arcgis.com/su8ic9KbA7PYVxPS/arcgis/rest/services/COH_BUILDING_PERMITS/FeatureServer/0",
+      [],
+      { warnOnly: true },
+    ],
+  ].map(([city, layer, req, opts]) => ({
+    name: `${city} permit feed (ArcGIS)`,
+    warnOnly: opts?.warnOnly === true,
+    async run() {
+      const url = `${layer}/query?where=1%3D1&outFields=*&resultRecordCount=10&returnGeometry=false&f=json`;
+      const headers = opts?.browserUa
+        ? { "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36" }
+        : undefined;
+      const data = await fetchJson(url, 3, headers);
       const feats = data.features || [];
       if (!feats.length) throw new Error(`no features (${JSON.stringify(data.error || data).slice(0, 160)})`);
       const a = feats[0].attributes || {};
-      if (!("PermitNumber" in a) || !("CompanyName" in a)) throw new Error(`expected fields missing: ${Object.keys(a).join(",").slice(0, 160)}`);
+      const missing = req.filter((f) => !(f in a));
+      if (missing.length) throw new Error(`expected fields missing (${missing.join(",")}): ${Object.keys(a).join(",").slice(0, 160)}`);
       const newest = newestDate(feats.map((f) => f.attributes));
+      if (newest && Date.now() - newest > 180 * DAY_MS)
+        return { warn: `newest date in sample ${new Date(newest).toISOString().slice(0, 10)} — stale (or unordered sample)` };
+      return `${feats.length} permits, fields intact, newest ${newest ? new Date(newest).toISOString().slice(0, 10) : "n/a"}`;
+    },
+  })),
+  // CKAN datastore permit feeds (Boston/WPRDC/San Jose/San Antonio/Milwaukee
+  // run CKAN, not Socrata) — same recency policy, warn-only.
+  ...[
+    ["Boston", "https://data.boston.gov/api/3/action/datastore_search?resource_id=6ddcd912-32a0-43df-9908-63574f8c7e77"],
+    ["Pittsburgh", "https://data.wprdc.org/api/3/action/datastore_search?resource_id=f4d1177a-f597-4c32-8cbf-7885f56253f6"],
+    ["San Jose", "https://data.sanjoseca.gov/api/3/action/datastore_search?resource_id=761b7ae8-3be1-4ad6-923d-c7af6404a904"],
+    ["San Antonio", "https://data.sanantonio.gov/api/3/action/datastore_search?resource_id=c21106f9-3ef5-4f3a-8604-f992b4db7512"],
+    ["Milwaukee", "https://data.milwaukee.gov/api/3/action/datastore_search?resource_id=828e9630-d7cb-42e4-960e-964eae916397"],
+  ].map(([city, url]) => ({
+    name: `${city} permit feed (CKAN)`,
+    async run() {
+      const data = await fetchJson(`${url}&limit=10`);
+      const recs = data.result?.records || [];
+      if (data.success === false || !recs.length)
+        throw new Error(`no records (${JSON.stringify(data.error || data).slice(0, 160)})`);
+      const newest = newestDate(recs);
+      if (newest && Date.now() - newest > 180 * DAY_MS)
+        return { warn: `newest date in sample ${new Date(newest).toISOString().slice(0, 10)} — stale (or unordered sample)` };
+      return `${recs.length} rows, newest ${newest ? new Date(newest).toISOString().slice(0, 10) : "n/a"}`;
+    },
+  })),
+  {
+    name: "Philadelphia permit feed (Carto)",
+    async run() {
+      // Same SQL shape the app sends (lat/lng projected out of the_geom).
+      const sql =
+        "SELECT permitnumber, permitissuedate, ST_Y(the_geom) AS latitude, ST_X(the_geom) AS longitude " +
+        "FROM permits WHERE permitissuedate IS NOT NULL ORDER BY permitissuedate DESC LIMIT 10";
+      const data = await fetchJson(`https://phl.carto.com/api/v2/sql?q=${encodeURIComponent(sql)}`);
+      const rows = data.rows || [];
+      if (!rows.length) throw new Error(`no rows (${JSON.stringify(data.error || data).slice(0, 160)})`);
+      if (!("permitnumber" in rows[0]) || !("latitude" in rows[0]))
+        throw new Error(`expected columns missing: ${Object.keys(rows[0]).join(",").slice(0, 160)}`);
+      const newest = newestDate(rows);
       if (newest && Date.now() - newest > 120 * DAY_MS)
-        return { warn: `newest IssuedDate ${new Date(newest).toISOString().slice(0, 10)} — stale?` };
-      return `${feats.length} permits, newest ${newest ? new Date(newest).toISOString().slice(0, 10) : "n/a"}`;
+        return { warn: `newest permitissuedate ${new Date(newest).toISOString().slice(0, 10)} — feed may be stale` };
+      return `${rows.length} rows, newest ${newest ? new Date(newest).toISOString().slice(0, 10) : "n/a"}`;
     },
   },
   {
