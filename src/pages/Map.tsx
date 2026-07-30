@@ -1434,24 +1434,6 @@ function ShareWatchRow({ id, watched, onWatch }: { id: string; watched: boolean;
   );
 }
 
-/** Is this permitted property on the market? We don't have a licensed feed for
- * every MLS, so link out to the marketplaces' own search for the address —
- * real listings, their data, one tap. */
-function ForSaleCheck({ address }: { address: string }) {
-  const q = encodeURIComponent(address);
-  return (
-    <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
-      <span className="text-muted-foreground">Is it listed for sale?</span>
-      <a href={`https://www.zillow.com/homes/${q}_rb/`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-foreground hover:border-gold hover:text-gold">
-        Check Zillow <ExternalLink className="h-3 w-3" />
-      </a>
-      <a href={`https://www.realtor.com/realestateandhomes-search?searchQuery=${q}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-foreground hover:border-gold hover:text-gold">
-        Realtor.com <ExternalLink className="h-3 w-3" />
-      </a>
-    </div>
-  );
-}
-
 /** The pro forma is YOUR model, not this project's finances — keep it behind
  * an explicit toggle so permit facts and modeled dollars never blur together. */
 function ModelToggle({ children }: { children: React.ReactNode }) {
@@ -1531,8 +1513,6 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
           )}
         </div>
 
-        <ForSaleCheck address={`${dev.name}, ${dev.city}, ${dev.state}`} />
-
         <ModelToggle>
           <InlineUnderwrite city={dev.city} type={dev.productType} buildableSqft={dev.sqftEstimated ? 0 : dev.buildingSqft} address={`${dev.name}, ${dev.city}, ${dev.state}`} />
         </ModelToggle>
@@ -1548,8 +1528,9 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
           </div>
           {!hasContractor && (
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              This city's open dataset doesn't publish the contractor on this record — the permit portal
-              shows the holder of record{permitNo ? ` for permit ${permitNo}` : ""}.
+              The permit holder IS public record, but this city's open dataset omits the name field —
+              the link above opens the city's own portal, where{permitNo ? ` permit ${permitNo}` : " this permit"} shows
+              who pulled it. Cities that publish names (Nashville, Denver, Raleigh, Memphis…) show them here automatically.
             </p>
           )}
         </Section>

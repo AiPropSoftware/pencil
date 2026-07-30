@@ -551,7 +551,7 @@ export function normalize(src: ArcgisCitySource, data: ArcgisResponse): { items:
     // "_dat\b" catches truncated field names like Chattanooga's PERMIT_DAT.
     const issued = firstDate(attrs, /issue|approv|final|date|_dat\b/i);
     const address = firstString(attrs, /address|location|site/i);
-    const contractor = firstString(attrs, /contractor|applicant|company|builder/i);
+    const contractor = firstString(attrs, /contractor|applicant|company|builder|\bcontact\b|owner.?name|business.?name/i);
     const permitId = firstString(attrs, /permit.*(no|num|id)|process.*num|^objectid$/i) || key;
 
     const estValue = valuation > 0 ? Math.max(valuation, Math.round(buildingSqft * src.metroPpsf * 0.5)) : Math.round(buildingSqft * src.metroPpsf);
