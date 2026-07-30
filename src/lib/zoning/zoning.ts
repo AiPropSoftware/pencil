@@ -1376,7 +1376,18 @@ async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number, 
             `geometry=${lng},${lat}&geometryType=esriGeometryPoint&sr=4326&layers=all&tolerance=2` +
             `&mapExtent=${lng - d},${lat - d},${lng + d},${lat + d}&imageDisplay=400,400,96&returnGeometry=false&f=json`;
           const id = (await getJson(`${svcUrl}/identify?${idq}`)) as { results?: { attributes?: Record<string, unknown> }[] };
-          data = { features: (id.results ?? []).map((r) => ({ attributes: r.attributes })) };
+          // identify formats some numerics with a unit suffix ("0.9223 A") —
+          // strip it so the area probes can parse the value.
+          const clean = (attrs?: Record<string, unknown>) => {
+            if (!attrs) return attrs;
+            const out: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(attrs)) {
+              const m = typeof v === "string" ? v.trim().match(/^([\d.,]+)\s+(a|ac|acres?|sq\.? ?ft\.?|sf)$/i) : null;
+              out[k] = m ? m[1].replace(/,/g, "") : v;
+            }
+            return out;
+          };
+          data = { features: (id.results ?? []).map((r) => ({ attributes: clean(r.attributes) })) };
         } else {
           const q = new URLSearchParams({
             geometry: `${lng},${lat}`,

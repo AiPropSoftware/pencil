@@ -28,7 +28,7 @@ function record(status, name, detail) {
   console.log(`${icon} [${status.toUpperCase()}] ${name} — ${detail}`);
 }
 
-async function fetchJson(url, tries = 2) {
+async function fetchJson(url, tries = 3) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
     try {
