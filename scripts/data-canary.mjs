@@ -272,11 +272,14 @@ const CHECKS = [
       const idData = await fetchJson(idUrl);
       const attrs = idData.results?.[0]?.attributes;
       if (!attrs) throw new Error(`identify: no parcel at Cedar Hill test point (${JSON.stringify(idData.error || {}).slice(0, 120)})`);
-      const acreEntry = Object.entries(attrs).find(
-        ([k, v]) => /acre|gis_area|lgl_area|legal_area/i.test(k) && Number(v) > 0.005 && Number(v) < 5000,
-      );
-      if (!acreEntry) throw new Error(`identify hit but no sane acreage field: ${Object.keys(attrs).join(",").slice(0, 160)}`);
-      return `parcel hit via identify — ${acreEntry[0]}=${acreEntry[1]} (app uses op:"identify" on this service)`;
+      // Field PRESENCE is the health signal (the city-centroid test point can
+      // land on a ROW/megaparcel with odd area values) — report the values.
+      const areaKeys = Object.keys(attrs).filter((k) => /acre|gis_area|lgl_area|legal_area/i.test(k));
+      if (!areaKeys.length) throw new Error(`identify hit but no area field at all: ${Object.keys(attrs).join(",").slice(0, 160)}`);
+      const vals = areaKeys.map((k) => `${k}=${attrs[k]}`).join(", ");
+      const anySane = areaKeys.some((k) => { const n = Number(String(attrs[k]).replace(/,/g, "")); return n > 0.005 && n < 5000; });
+      if (!anySane) return { warn: `identify works, area fields present but values odd at the test point (${vals}) — likely a ROW/megaparcel hit; spot-check a real address` };
+      return `parcel hit via identify — ${vals} (app uses op:"identify" on this service)`;
     },
   },
   {
