@@ -25,27 +25,24 @@ export function Header() {
       <div className="container flex h-14 items-center justify-between">
         <Logo />
         <div className="flex items-center gap-3">
-          <Button size="sm" variant="ghost" asChild>
-            <Link to="/pricing">Pricing</Link>
-          </Button>
           {user ? (
-            <>
-              <Button size="sm" variant="gold" asChild>
-                <Link to="/map">Open the map</Link>
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={async () => {
-                  await signOut();
-                  navigate("/");
-                }}
-              >
-                Sign out
-              </Button>
-            </>
+            // Signed in: keep the chrome minimal — the map IS the app, and
+            // upgrade prompts live in the trial banner / gates, not the header.
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={async () => {
+                await signOut();
+                navigate("/");
+              }}
+            >
+              Sign out
+            </Button>
           ) : (
             <>
+              <Button size="sm" variant="ghost" asChild>
+                <Link to="/pricing">Pricing</Link>
+              </Button>
               <Button size="sm" variant="ghost" asChild>
                 <Link to="/sign-in">Sign in</Link>
               </Button>

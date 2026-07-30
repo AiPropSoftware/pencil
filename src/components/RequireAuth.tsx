@@ -47,6 +47,25 @@ export function RequireAuth({ children, requireRole = "free" }: Props) {
 
   const userRank = RANK[role ?? "free"];
   if (userRank < RANK[requireRole]) {
+    // Admin pages get an admin explanation, not a Pro-plan sales pitch.
+    if (requireRole === "admin") {
+      return (
+        <div className="container py-16 max-w-xl">
+          <div className="gold-rule" />
+          <h2 className="mt-3 font-display text-3xl">Team access only</h2>
+          <p className="mt-3 text-muted-foreground">
+            This page is for Pencil admins. You're signed in as{" "}
+            <span className="font-medium text-foreground">{user.email}</span> — to grant this
+            account admin access, run this in the Supabase SQL Editor, then refresh:
+          </p>
+          <pre className="mt-4 overflow-x-auto rounded-md border border-border bg-secondary/40 p-3 text-xs">
+{`insert into public.user_roles (user_id, role)
+select id, 'admin' from auth.users where email = '${user.email}'
+on conflict (user_id, role) do nothing;`}
+          </pre>
+        </div>
+      );
+    }
     return (
       <div className="container py-16 max-w-xl">
         <div className="gold-rule" />
