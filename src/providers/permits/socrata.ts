@@ -29,11 +29,21 @@ const pick = (row: Record<string, unknown>, keys: string[]): unknown => {
 /** Extract coordinates from the many shapes Socrata datasets use. */
 function coordsFrom(row: Record<string, unknown>): { lat: number; lng: number } | null {
   const lat = num(pick(row, ["latitude", "lat", "gis_latitude", "y_coordinate", "y", "y_latitude", "Y_COORD", "Latitude"]));
-  const lng = num(pick(row, ["longitude", "long", "lng", "gis_longitude", "x_coordinate", "x", "x_longitude", "X_COORD", "Longitude"]));
+  const lng = num(pick(row, ["longitude", "long", "lng", "lon", "gis_longitude", "x_coordinate", "x", "x_longitude", "X_COORD", "Longitude"]));
   if (Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0) return { lat, lng };
 
-  for (const key of ["location", "mapped_location", "location_1", "the_geom", "geocoded_column", "point", "geolocation"]) {
-    const v = row[key] as Record<string, unknown> | undefined;
+  for (const key of ["location", "mapped_location", "location_1", "the_geom", "geocoded_column", "point", "geolocation", "gx_location"]) {
+    let v = row[key] as Record<string, unknown> | string | undefined;
+    // Some portals ship the location as a string: WKT "POINT (lng lat)" or
+    // serialized JSON (San Jose gx_location) — parse before the object path.
+    if (typeof v === "string") {
+      const m = v.match(/point\s*\(\s*(-?\d+\.?\d*)[ ,]+(-?\d+\.?\d*)\s*\)/i);
+      if (m) {
+        const lo = parseFloat(m[1]), la = parseFloat(m[2]);
+        if (Number.isFinite(la) && Number.isFinite(lo)) return { lat: la, lng: lo };
+      }
+      try { v = JSON.parse(v) as Record<string, unknown>; } catch { continue; }
+    }
     if (!v || typeof v !== "object") continue;
     const coords = (v as { coordinates?: unknown }).coordinates;
     if (Array.isArray(coords) && coords.length >= 2) {
@@ -81,6 +91,11 @@ export interface CitySource {
   kind?: "socrata" | "ckan" | "carto";
   /** carto only: SQL with a {limit} placeholder. */
   cartoQuery?: string;
+  /** carto only: broader SQL retried when cartoQuery returns no rows. */
+  cartoQueryFallback?: string;
+  /** ckan only: datastore sort (default "_id desc") — set to the dataset's
+   * real date column when insertion order isn't chronological (Boston). */
+  ckanSort?: string;
   where?: string;       // optional SoQL filter to boost new-construction yield
 }
 
@@ -90,47 +105,59 @@ export interface CitySource {
  * falls back to demo data if the dataset id or fields need correcting.
  */
 export const CITY_SOURCES: CitySource[] = [
-  { city: "Austin", state: "TX", url: "https://data.austintexas.gov/resource/3syk-w9eu.json", metroPpsf: 390, lat: 30.27, lng: -97.74, limit: 8000 },
+  // Probe-verified enum values ("work_class = 'New'" etc.) narrow each fetch
+  // to new construction server-side; the retry ladder falls back to the plain
+  // query if a portal ever renames the column.
+  { city: "Austin", state: "TX", url: "https://data.austintexas.gov/resource/3syk-w9eu.json", metroPpsf: 390, lat: 30.27, lng: -97.74, limit: 8000, where: "work_class = 'New'" },
   { city: "Chicago", state: "IL", url: "https://data.cityofchicago.org/resource/ydr8-5enu.json", metroPpsf: 360, lat: 41.88, lng: -87.63, limit: 6000, where: "permit_type='PERMIT - NEW CONSTRUCTION'" },
-  { city: "Seattle", state: "WA", url: "https://data.seattle.gov/resource/76t5-zqzr.json", metroPpsf: 660, lat: 47.61, lng: -122.33, limit: 6000 },
+  { city: "Seattle", state: "WA", url: "https://data.seattle.gov/resource/76t5-zqzr.json", metroPpsf: 660, lat: 47.61, lng: -122.33, limit: 6000, where: "permittypedesc = 'New'" },
   { city: "San Francisco", state: "CA", url: "https://data.sfgov.org/resource/i98e-djp9.json", metroPpsf: 1150, lat: 37.77, lng: -122.42, limit: 6000, where: "lower(permit_type_definition) LIKE '%new construction%'" },
-  { city: "New York", state: "NY", url: "https://data.cityofnewyork.us/resource/ipu4-2q9a.json", metroPpsf: 760, lat: 40.71, lng: -74.01, limit: 6000 },
+  { city: "New York", state: "NY", url: "https://data.cityofnewyork.us/resource/ipu4-2q9a.json", metroPpsf: 760, lat: 40.71, lng: -74.01, limit: 6000, where: "permit_type = 'NB'" },
   // LADBS retired yv23-pmwf ("…Old", login-walled 2026-07, caught by the data
   // canary); pi9x-tg5x is the current "Building Permits Issued from 2020 to
-  // Present" dataset.
-  { city: "Los Angeles", state: "CA", url: "https://data.lacity.org/resource/pi9x-tg5x.json", metroPpsf: 780, lat: 34.05, lng: -118.24, limit: 6000 },
+  // Present" dataset. "Bldg-New" is its verified new-building enum.
+  { city: "Los Angeles", state: "CA", url: "https://data.lacity.org/resource/pi9x-tg5x.json", metroPpsf: 780, lat: 34.05, lng: -118.24, limit: 6000, where: "permit_type = 'Bldg-New'" },
   { city: "Fort Worth", state: "TX", url: "https://data.fortworthtexas.gov/resource/quz7-xnsy.json", metroPpsf: 210, lat: 32.75, lng: -97.33, limit: 5000 },
-  // Dallas OpenData "Building Permits" (official, Socrata): dallasopendata.com/Services/Building-Permits/e7gq-4sah
-  { city: "Dallas", state: "TX", url: "https://www.dallasopendata.com/resource/e7gq-4sah.json", metroPpsf: 310, lat: 32.78, lng: -96.80, limit: 6000 },
+  // Dallas "Building Permits" (e7gq-4sah) carries no coordinates — "Permit
+  // Points" (6ik7-4gqj) is the geocoded sibling (the_geom).
+  { city: "Dallas", state: "TX", url: "https://www.dallasopendata.com/resource/6ik7-4gqj.json", metroPpsf: 310, lat: 32.78, lng: -96.80, limit: 6000 },
 
   // ---- 2026 coverage expansion — every endpoint below was research-verified
   // ---- against indexed portal pages / working code, and is re-verified daily
   // ---- by the data canary. $/sf figures are metro median-sale (Redfin) —
   // ---- market anchors, not new-construction quotes.
-  // New Orleans "Permits - BLDS" — BLDS-standard schema, native field match.
-  { city: "New Orleans", state: "LA", url: "https://data.nola.gov/resource/72f9-bi28.json", metroPpsf: 210, lat: 29.95, lng: -90.07, limit: 5000 },
+  // New Orleans: the BLDS dataset (72f9-bi28) carries no coordinates —
+  // "Building Permits (2018-present)" (nbcf-m6c2) is the geocoded feed.
+  { city: "New Orleans", state: "LA", url: "https://data.nola.gov/resource/nbcf-m6c2.json", metroPpsf: 210, lat: 29.95, lng: -90.07, limit: 5000 },
   // Kansas City removed: ue52-x8g8 went login-walled (canary 2026-07-30,
   // HTTP 403) and the open catalog only carries per-decade historical
   // listings — no live public feed to wire.
-  // Orlando "Permit Applications" — contractor_name + geocoded_column.
-  { city: "Orlando", state: "FL", url: "https://data.cityoforlando.net/resource/ryhf-m453.json", metroPpsf: 250, lat: 28.54, lng: -81.38, limit: 6000 },
-  // Boston "Approved Building Permits" (Analyze Boston, CKAN datastore).
-  { city: "Boston", state: "MA", kind: "ckan", url: "https://data.boston.gov/api/3/action/datastore_search?resource_id=6ddcd912-32a0-43df-9908-63574f8c7e77", metroPpsf: 695, lat: 42.36, lng: -71.06, limit: 5000 },
-  // Pittsburgh "PLI Permits" (WPRDC CKAN) — contractor_name populated.
+  // Orlando "Permit Applications": geocoded_column is null on the newest
+  // applications, so an unfiltered sample maps nothing — ask for rows that
+  // are actually geocoded.
+  { city: "Orlando", state: "FL", url: "https://data.cityoforlando.net/resource/ryhf-m453.json", metroPpsf: 250, lat: 28.54, lng: -81.38, limit: 6000, where: "geocoded_column IS NOT NULL" },
+  // Boston "Approved Building Permits" — the datastore is bulk-reloaded, so
+  // _id order isn't chronological; sort by the real issue date.
+  { city: "Boston", state: "MA", kind: "ckan", url: "https://data.boston.gov/api/3/action/datastore_search?resource_id=6ddcd912-32a0-43df-9908-63574f8c7e77", metroPpsf: 695, lat: 42.36, lng: -71.06, limit: 5000, ckanSort: "issued_date desc" },
+  // Pittsburgh (WPRDC CKAN). The recent window of this resource is fire-
+  // suppression / storm-water permits — excluded by the normalizer so they
+  // never masquerade as new construction.
   { city: "Pittsburgh", state: "PA", kind: "ckan", url: "https://data.wprdc.org/api/3/action/datastore_search?resource_id=f4d1177a-f597-4c32-8cbf-7885f56253f6", metroPpsf: 203, lat: 40.44, lng: -79.99, limit: 5000 },
-  // San Jose "Active Building Permits" (CKAN) — CONTRACTOR + PERMITVALUATION.
+  // San Jose "Active Building Permits" (CKAN) — location arrives as a
+  // gx_location string (parsed by coordsFrom).
   { city: "San Jose", state: "CA", kind: "ckan", url: "https://data.sanjoseca.gov/api/3/action/datastore_search?resource_id=761b7ae8-3be1-4ad6-923d-c7af6404a904", metroPpsf: 889, lat: 37.34, lng: -121.89, limit: 5000 },
   // San Antonio "PERMITS ISSUED" (CKAN) — mixed-SRS coords are dropped by the
   // city-center sanity check, WGS84 rows pin correctly.
   { city: "San Antonio", state: "TX", kind: "ckan", url: "https://data.sanantonio.gov/api/3/action/datastore_search?resource_id=c21106f9-3ef5-4f3a-8604-f992b4db7512", metroPpsf: 157, lat: 29.42, lng: -98.49, limit: 5000 },
-  // Milwaukee residential+commercial permit work (CKAN; no coords in schema —
-  // rides the list views until the city publishes locations).
-  { city: "Milwaukee", state: "WI", kind: "ckan", url: "https://data.milwaukee.gov/api/3/action/datastore_search?resource_id=828e9630-d7cb-42e4-960e-964eae916397", metroPpsf: 201, lat: 43.04, lng: -87.91, limit: 4000 },
-  // Philadelphia L&I permits (Carto SQL API) — current eCLIPSE "permits" table.
+  // Milwaukee removed: the only public permit resource is a CSV with no
+  // coordinates (probe-verified 2026-07-30) — nothing honest to map.
+  // Philadelphia L&I permits (Carto SQL API) — new-construction filter first
+  // (typeofwork values probe-verified), full feed as fallback.
   {
     city: "Philadelphia", state: "PA", kind: "carto",
     url: "https://phl.carto.com/api/v2/sql",
-    cartoQuery: "SELECT *, ST_Y(the_geom) AS latitude, ST_X(the_geom) AS longitude FROM permits WHERE permitissuedate IS NOT NULL ORDER BY permitissuedate DESC LIMIT {limit}",
+    cartoQuery: "SELECT *, ST_Y(the_geom) AS latitude, ST_X(the_geom) AS longitude FROM permits WHERE permitissuedate IS NOT NULL AND typeofwork ILIKE '%new construction%' ORDER BY permitissuedate DESC LIMIT {limit}",
+    cartoQueryFallback: "SELECT *, ST_Y(the_geom) AS latitude, ST_X(the_geom) AS longitude FROM permits WHERE permitissuedate IS NOT NULL ORDER BY permitissuedate DESC LIMIT {limit}",
     metroPpsf: 198, lat: 39.95, lng: -75.17, limit: 5000,
   },
 ];
@@ -159,9 +186,9 @@ export async function fetchCityDevelopments(src: CitySource, limitOverride?: num
     try {
       let rows: Record<string, unknown>[] = [];
       if (src.kind === "ckan") {
-        // datastore_search: {result: {records: [...]}}. Newest-first via
-        // _id desc where supported; fall back to the plain query.
-        url = `${src.url}&limit=${limit}&sort=_id desc`;
+        // datastore_search: {result: {records: [...]}}. Newest-first via the
+        // source's sort (default _id desc); fall back to the plain query.
+        url = `${src.url}&limit=${limit}&sort=${src.ckanSort ?? "_id desc"}`;
         let res = await fetch(url, { headers: { Accept: "application/json" } });
         if (!res.ok) {
           url = `${src.url}&limit=${limit}`;
@@ -173,9 +200,16 @@ export async function fetchCityDevelopments(src: CitySource, limitOverride?: num
       } else {
         const q = (src.cartoQuery ?? "").replace("{limit}", String(limit));
         url = `${src.url}?q=${encodeURIComponent(q)}`;
-        const res = await fetch(url, { headers: { Accept: "application/json" } });
-        if (!res.ok) return { city: src.city, items: [], total: 0, columns: [], url, buildPpsfSamples: 0, error: `HTTP ${res.status}` };
-        const data = await res.json();
+        let res = await fetch(url, { headers: { Accept: "application/json" } });
+        let data = res.ok ? await res.json() : null;
+        // Filtered query empty/rejected (column rename?) → broad fallback.
+        if (src.cartoQueryFallback && !(data?.rows ?? []).length) {
+          const fq = src.cartoQueryFallback.replace("{limit}", String(limit));
+          url = `${src.url}?q=${encodeURIComponent(fq)}`;
+          res = await fetch(url, { headers: { Accept: "application/json" } });
+          data = res.ok ? await res.json() : data;
+        }
+        if (!res.ok && !(data?.rows ?? []).length) return { city: src.city, items: [], total: 0, columns: [], url, buildPpsfSamples: 0, error: `HTTP ${res.status}` };
         rows = (data?.rows ?? []) as Record<string, unknown>[];
       }
       return normalizeRows(src, rows, url);
@@ -245,20 +279,31 @@ function normalizeRows(src: CitySource, rows: Record<string, unknown>[], url: st
     if (tooCoarse(coords.lat) && tooCoarse(coords.lng)) continue;
 
     const typeDesc = String(pick(r, ["permit_type_desc", "permit_type", "permittype", "permit_type_definition", "permittypedesc", "permit_type_description"]) ?? "");
-    const pclass = String(pick(r, ["permit_class", "permit_class_mapped", "permitclass", "permitclassmapped"]) ?? "");
+    const pclass = String(pick(r, ["permit_class", "permit_class_mapped", "permitclass", "permitclassmapped", "permit_sub_type", "occupancytype"]) ?? "");
     const work = String(pick(r, ["work_class", "work_type", "job_type", "worktype", "typeofwork", "WORK TYPE", "Permit Type"]) ?? "");
-    const desc = String(pick(r, ["description", "work_description", "purpose", "job_description", "proposed_use", "permitdescription", "approvedscopeofwork", "WORKDESCRIPTION", "PROJECT NAME"]) ?? "");
+    const desc = String(pick(r, ["description", "work_description", "work_desc", "purpose", "job_description", "proposed_use", "use_desc", "permitdescription", "approvedscopeofwork", "WORKDESCRIPTION", "PROJECT NAME"]) ?? "");
     const blob = `${typeDesc} ${pclass} ${work} ${desc}`;
     const residentialFlag = String(pick(r, ["residential"]) ?? "").toLowerCase();
 
-    const isBuilding = /building|construction/i.test(blob) || typeDesc === "";
+    // Non-building permit records that pattern-match residential words
+    // (fire suppression at a house, driveway cuts, storm water) are never
+    // developments — hard-exclude before anything else.
+    if (/suppression|sprinkler|storm ?water|driveway|sidewalk|curb cut/i.test(blob)) continue;
+
+    // "Bldg-New" (LA) and bare "New" / SF's numeric 1/2 type codes are
+    // building permits even though the word "building" never appears.
+    const isBuilding = /building|construction|\bbldg\b|bldg-/i.test(blob) || typeDesc === "" || /^new$/i.test(typeDesc.trim()) || /^[12]$/.test(typeDesc.trim());
     const isResidential =
       residentialFlag === "yes" ||
-      /resid|family|duplex|town|apartment|condo|dwelling|sfr|r-?\s*1\d\d/i.test(blob);
+      /resid|famil|\bfam\b|\dfam|duplex|town|apartment|condo|dwelling|sfr|\dunit|r-?\s*1\d\d/i.test(blob);
     const isRemodel = /remodel|repair|addition|alteration|demo|interior|reroof|roof|mechanic|electric|plumb|hvac|pool|fence|sign|solar|irrigation|revision/i.test(blob);
-    const isNew = /\bnb\b|new/i.test(work) || /new construction|new building|new dwelling/i.test(blob) || work === "";
+    // A definite new-construction phrase outranks incidental remodel words —
+    // long descriptions of new builds routinely mention the roof, plumbing,
+    // or the structure they replaced ("demolished due to storm damage").
+    const strongNew = /new construction|construct(ion of)? (a )?new|new single family|new sfr|new residence|new home|new dwelling|new building|\berect\b|\bnewcon\b/i.test(blob);
+    const isNew = strongNew || /\bnb\b|new/i.test(work) || work === "";
     const nycStyleNewBuilding = residentialFlag === "yes" && /\bnb\b/i.test(work);
-    if (!nycStyleNewBuilding && !(isBuilding && isResidential && !isRemodel && isNew)) continue;
+    if (!nycStyleNewBuilding && !(isBuilding && isResidential && isNew && (strongNew || !isRemodel))) continue;
 
     const key = `${coords.lat.toFixed(5)},${coords.lng.toFixed(5)}`;
     if (seen.has(key)) continue;

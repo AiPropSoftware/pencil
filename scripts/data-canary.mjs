@@ -163,8 +163,10 @@ const CHECKS = [
     ["San Francisco", "https://data.sfgov.org/resource/i98e-djp9.json"],
     ["New York", "https://data.cityofnewyork.us/resource/ipu4-2q9a.json"],
     ["Los Angeles", "https://data.lacity.org/resource/pi9x-tg5x.json"],
-    ["Dallas", "https://www.dallasopendata.com/resource/e7gq-4sah.json"],
-    ["New Orleans", "https://data.nola.gov/resource/72f9-bi28.json"],
+    // Dallas + New Orleans: geocoded siblings of the coordinate-less
+    // "Building Permits" datasets (probe-verified 2026-07-30).
+    ["Dallas", "https://www.dallasopendata.com/resource/6ik7-4gqj.json"],
+    ["New Orleans", "https://data.nola.gov/resource/nbcf-m6c2.json"],
     // Kansas City pruned: ue52-x8g8 login-walled 2026-07-30, no successor.
     ["Orlando", "https://data.cityoforlando.net/resource/ryhf-m453.json"],
   ].map(([city, url]) => ({
@@ -338,7 +340,7 @@ const CHECKS = [
     ["Pittsburgh", "https://data.wprdc.org/api/3/action/datastore_search?resource_id=f4d1177a-f597-4c32-8cbf-7885f56253f6"],
     ["San Jose", "https://data.sanjoseca.gov/api/3/action/datastore_search?resource_id=761b7ae8-3be1-4ad6-923d-c7af6404a904"],
     ["San Antonio", "https://data.sanantonio.gov/api/3/action/datastore_search?resource_id=c21106f9-3ef5-4f3a-8604-f992b4db7512"],
-    ["Milwaukee", "https://data.milwaukee.gov/api/3/action/datastore_search?resource_id=828e9630-d7cb-42e4-960e-964eae916397"],
+    // Milwaukee pruned: only a coordinate-less CSV exists (2026-07-30).
   ].map(([city, url, dateField]) => ({
     name: `${city} permit feed (CKAN)`,
     async run() {

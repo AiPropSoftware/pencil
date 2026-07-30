@@ -446,10 +446,16 @@ function normalize(src: ArcgisCitySource, data: ArcgisResponse): { items: Develo
     if (tooCoarse(coords.lat) && tooCoarse(coords.lng)) continue;
 
     const blob = textBlob(attrs, /type|class|desc|work|use|scope|category|status/i);
-    const isResidential = /resid|family|duplex|town|apartment|condo|dwelling|sfr/i.test(blob);
-    const isNew = /new construction|new building|new dwelling|\bnew\b/i.test(blob);
+    // Non-development record types that pattern-match residential words.
+    if (/suppression|sprinkler|storm ?water|driveway|sidewalk|curb cut|right.of.way|\brow\b|home occupation/i.test(blob)) continue;
+    const isResidential = /resid|famil|\bfam\b|duplex|town|apartment|condo|dwelling|sfr|\bsfd\b|\bmfd\b|\bres\b|tract home|custom home/i.test(blob);
+    // A definite new-construction phrase outranks incidental remodel words —
+    // real new-build descriptions routinely mention the roof, plumbing, or a
+    // demolished predecessor ("replacement home ... demolished ...").
+    const strongNew = /new construction|construct(ion of)? (a )?new|new single family|new sfr|new residence|new dwelling|new building|\berect\b|tract home|custom home/i.test(blob);
+    const isNew = strongNew || /new construction|new building|new dwelling|\bnew\b/i.test(blob);
     const isRemodel = /remodel|repair|addition|alteration|demo|interior|reroof|roof|mechanic|electric|plumb|hvac|pool|fence|sign|solar|shutter|awning|revision/i.test(blob);
-    if (isRemodel) continue;
+    if (isRemodel && !strongNew) continue;
     // Layers scoped to new-residential by definition keep rows even when the
     // record carries no descriptive text for the keyword filter to see.
     if (!src.residentialNewOnly && (!isResidential || !isNew)) continue;
