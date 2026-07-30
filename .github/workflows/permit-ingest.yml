@@ -1,0 +1,34 @@
+name: Permit ingest
+
+# Daily permanent-storage pass: runs the app's real permit pipeline from a
+# runner (open egress) and upserts every normalized permit into the Supabase
+# `permits` table. Rows accumulate forever — this is the firm copy of the data
+# that survives portal window trims, reorders, and outages. No-ops politely
+# until the SUPABASE_SERVICE_ROLE_KEY secret exists.
+on:
+  schedule:
+    - cron: "0 12 * * *"   # daily, ~30 min after the data canary
+  workflow_dispatch:
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch live permits and upsert into Supabase
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          npx --yes esbuild@0.24.2 scripts/ingest-permits.ts \
+            --bundle --platform=node --format=esm --outfile=ingest.mjs \
+            "--alias:@=./src" "--define:import.meta.env={}"
+          node ingest.mjs | tee ingest-report.txt
+      - name: Publish summary
+        if: always()
+        run: |
+          echo '## Permit ingest' >> "$GITHUB_STEP_SUMMARY"
+          tail -c 8000 ingest-report.txt >> "$GITHUB_STEP_SUMMARY" || true
