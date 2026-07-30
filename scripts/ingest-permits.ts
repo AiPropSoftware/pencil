@@ -31,7 +31,7 @@ const { fetchAllCityDevelopments } = await import("../src/providers/permits/socr
 
 const r = await fetchAllCityDevelopments();
 const now = new Date().toISOString();
-const rows = r.items.map((d) => ({
+const allRows = r.items.map((d) => ({
   id: d.id,
   city: d.city,
   state: d.state,
@@ -53,7 +53,21 @@ const rows = r.items.map((d) => ({
   last_seen_at: now, // first_seen_at is set once by the column default
 }));
 
-console.log(`Fetched ${rows.length} permits from ${r.liveCityNames.length} cities: ${r.liveCityNames.join(", ")}`);
+// Postgres rejects a batch that touches the same primary key twice
+// ("ON CONFLICT DO UPDATE cannot affect row a second time"), and duplicate ids
+// are legitimate in the source data: a city can issue several records under one
+// permit number, and two sources can cover the same city (Dallas Socrata +
+// Dallas ArcGIS). Items arrive newest-first, so the first sighting wins.
+const byId = new Map<string, (typeof allRows)[number]>();
+for (const row of allRows) if (!byId.has(row.id)) byId.set(row.id, row);
+const rows = [...byId.values()];
+
+console.log(
+  `Fetched ${allRows.length} permits from ${r.liveCityNames.length} cities: ${r.liveCityNames.join(", ")}`,
+);
+if (rows.length !== allRows.length) {
+  console.log(`Deduped ${allRows.length - rows.length} rows sharing a permit id — upserting ${rows.length}.`);
+}
 
 let upserted = 0;
 for (let i = 0; i < rows.length; i += 500) {
