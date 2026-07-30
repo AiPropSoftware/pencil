@@ -256,6 +256,37 @@ export const ARCGIS_SOURCES: ArcgisCitySource[] = [
     limit: 3000,
   },
   {
+    city: "Chattanooga",
+    state: "TN",
+    candidates: [
+      // City of Chattanooga AGOL archive (2006 → 2025-12-31): geocoded points,
+      // PERMIT_DAT/P_TYPE/CATEGORY/DEV_TYPE_C. FROZEN BY DESIGN — the city has
+      // no fresh open feed (Socrata retired 2025-12, Hub CSV died 2026-06);
+      // real history with real dates beats nothing, and the store banks it.
+      "https://services2.arcgis.com/cclAu9OKhOfjeUdr/arcgis/rest/services/Chatt_permits_to_12_31_2025/FeatureServer/0",
+    ],
+    metroPpsf: 190,
+    lat: 35.05,
+    lng: -85.31,
+    limit: 3000,
+  },
+  {
+    city: "Knoxville",
+    state: "TN",
+    candidates: [
+      // City LDTM_Permits (freshest open data, ~Dec 2025) first, Knox County
+      // BuildingPermits (county-wide, frozen ~May 2025) as fallback. Both are
+      // geocoded with CONTRACTOR populated; both update sporadically at best —
+      // the live system of record (Accela) publishes no open JSON.
+      "https://services1.arcgis.com/QWaOgwdmpqI9HUzf/arcgis/rest/services/LDTM_Permits/FeatureServer/0",
+      "https://services8.arcgis.com/Ty9G85JMF2cDHlRt/arcgis/rest/services/BuildingPermits/FeatureServer/0",
+    ],
+    metroPpsf: 215,
+    lat: 35.96,
+    lng: -83.92,
+    limit: 3000,
+  },
+  {
     city: "Tampa",
     state: "FL",
     candidates: [

@@ -297,6 +297,21 @@ const CHECKS = [
       { dateField: "CREATEDDATE" },
     ],
     [
+      // Frozen archive by design (city publishes no fresh open feed) — a
+      // stale warning here is TRUE, and a resurrected live layer at
+      // data.chattanooga.gov is the recovery signal to watch for.
+      "Chattanooga",
+      "https://services2.arcgis.com/cclAu9OKhOfjeUdr/arcgis/rest/services/Chatt_permits_to_12_31_2025/FeatureServer/0",
+      ["PERMIT_DAT"],
+      { dateField: "PERMIT_DAT" },
+    ],
+    [
+      "Knoxville",
+      "https://services1.arcgis.com/QWaOgwdmpqI9HUzf/arcgis/rest/services/LDTM_Permits/FeatureServer/0",
+      ["DATEISSUED", "CONTRACTOR"],
+      { dateField: "DATEISSUED" },
+    ],
+    [
       "Houston (Harris County, unincorporated)",
       "https://www.gis.hctx.net/arcgishcpid/rest/services/Permits/IssuedPermits/FeatureServer/0",
       ["PERMITNUMBER", "ISSUEDDATE"],
@@ -358,6 +373,26 @@ const CHECKS = [
       return `${recs.length} rows, newest ${newest ? new Date(newest).toISOString().slice(0, 10) : "n/a"}`;
     },
   })),
+  {
+    name: "Memphis / Shelby County permit feed (OpenDataSoft)",
+    async run() {
+      // Data Midsouth: the metro's only open geocoded feed. Monthly batch
+      // with ~40-day lag — freshness warns at 120 days, not 30.
+      const url =
+        "https://www.datamidsouth.org/api/explore/v2.1/catalog/datasets/shelby-county-building-and-demolition-permits/records" +
+        "?order_by=" + encodeURIComponent("date_status desc") + "&limit=10";
+      const data = await fetchJson(url);
+      const rows = data?.results ?? [];
+      if (!rows.length) throw new Error(`no results (${JSON.stringify(data).slice(0, 160)})`);
+      for (const f of ["record_id", "lat", "lon", "date_status"]) {
+        if (!(f in rows[0])) throw new Error(`field ${f} missing — schema changed? fields: ${Object.keys(rows[0]).join(",").slice(0, 160)}`);
+      }
+      const newest = newestDate(rows);
+      if (newest && Date.now() - newest > 120 * DAY_MS)
+        return { warn: `newest date_status ${new Date(newest).toISOString().slice(0, 10)} — beyond the normal ~40-day publication lag` };
+      return `${rows.length} rows, newest ${newest ? new Date(newest).toISOString().slice(0, 10) : "n/a"} (monthly feed)`;
+    },
+  },
   {
     name: "Philadelphia permit feed (Carto)",
     async run() {
