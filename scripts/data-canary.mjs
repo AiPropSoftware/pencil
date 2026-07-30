@@ -190,26 +190,32 @@ const CHECKS = [
       return `${rows.length} rows, newest ${newest ? new Date(newest).toISOString().slice(0, 10) : "n/a"}`;
     },
   })),
-  {
-    name: "Miami permit feed (City of Miami Building_Permits_Since_2014)",
-    async run() {
+  // ArcGIS-hosted permit-record layers: [city, layer URL, two fields that
+  // must exist]. Same recency policy as the Socrata feeds (warn-only).
+  ...[
+    [
+      "Miami",
       // The old services6/ONZht79c8QWuX759 URL was a false positive (Peel
-      // Region, Ontario — housing-unit aggregates). This is the real City of
-      // Miami org's per-record permits layer.
-      const url =
-        "https://services1.arcgis.com/CvuPhqcTQpZPT9qY/arcgis/rest/services/Building_Permits_Since_2014/FeatureServer/0/query" +
-        "?where=1%3D1&outFields=PermitNumber,CompanyName,IssuedDate,TotalSQFT&resultRecordCount=10&orderByFields=IssuedDate%20DESC&returnGeometry=false&f=json";
+      // Region, Ontario). CvuPhqcTQpZPT9qY is the real City of Miami org.
+      "https://services1.arcgis.com/CvuPhqcTQpZPT9qY/arcgis/rest/services/Building_Permits_Since_2014/FeatureServer/0",
+      ["PermitNumber", "CompanyName"],
+    ],
+  ].map(([city, layer, req]) => ({
+    name: `${city} permit feed (ArcGIS)`,
+    async run() {
+      const url = `${layer}/query?where=1%3D1&outFields=*&resultRecordCount=10&returnGeometry=false&f=json`;
       const data = await fetchJson(url);
       const feats = data.features || [];
       if (!feats.length) throw new Error(`no features (${JSON.stringify(data.error || data).slice(0, 160)})`);
       const a = feats[0].attributes || {};
-      if (!("PermitNumber" in a) || !("CompanyName" in a)) throw new Error(`expected fields missing: ${Object.keys(a).join(",").slice(0, 160)}`);
+      const missing = req.filter((f) => !(f in a));
+      if (missing.length) throw new Error(`expected fields missing (${missing.join(",")}): ${Object.keys(a).join(",").slice(0, 160)}`);
       const newest = newestDate(feats.map((f) => f.attributes));
-      if (newest && Date.now() - newest > 120 * DAY_MS)
-        return { warn: `newest IssuedDate ${new Date(newest).toISOString().slice(0, 10)} — stale?` };
-      return `${feats.length} permits, newest ${newest ? new Date(newest).toISOString().slice(0, 10) : "n/a"}`;
+      if (newest && Date.now() - newest > 180 * DAY_MS)
+        return { warn: `newest date in sample ${new Date(newest).toISOString().slice(0, 10)} — stale (or unordered sample)` };
+      return `${feats.length} permits, fields intact, newest ${newest ? new Date(newest).toISOString().slice(0, 10) : "n/a"}`;
     },
-  },
+  })),
   {
     name: "Fort Worth permit feed",
     async run() {
