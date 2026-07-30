@@ -98,10 +98,10 @@ export const ARCGIS_SOURCES: ArcgisCitySource[] = [
     city: "Houston",
     state: "TX",
     candidates: [
-      // City of Houston publishes no confirmed open permit feed; the COH layer
-      // is a best-effort guess and Harris County covers unincorporated areas
-      // (PERMITNUMBER, ISSUEDDATE, APPLICANTNAME). mycity.houstontx.gov is dead.
-      "https://services.arcgis.com/su8ic9KbA7PYVxPS/arcgis/rest/services/COH_BUILDING_PERMITS/FeatureServer/0",
+      // City of Houston publishes no open permit feed (the COH guess layer
+      // 400'd — canary 2026-07-30; mycity.houstontx.gov is dead). Harris
+      // County's issued-permits layer is the only live source: county /
+      // unincorporated scope (PERMITNUMBER, ISSUEDDATE, APPLICANTNAME).
       "https://www.gis.hctx.net/arcgishcpid/rest/services/Permits/IssuedPermits/FeatureServer/0",
     ],
     metroPpsf: 179,

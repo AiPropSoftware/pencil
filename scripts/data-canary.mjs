@@ -105,7 +105,10 @@ const CHECKS = [
   },
   {
     name: "Chicago zoning polygons point query (dj47-wfun)",
-    expectZone: "RT-4",
+    // Baseline updated 2026-07-30: the test point rezoned RT-4 → PD 58
+    // (Planned Development), consistent across three consecutive runs of the
+    // live dataset. The app reads zone_class live, so no app change needed.
+    expectZone: "PD 58",
     async run() {
       // 7cve-jgbp turned out to be the MAP visualization asset (no queryable
       // rows); dj47-wfun is the underlying tabular resource the app queries.
@@ -162,7 +165,7 @@ const CHECKS = [
     ["Los Angeles", "https://data.lacity.org/resource/pi9x-tg5x.json"],
     ["Dallas", "https://www.dallasopendata.com/resource/e7gq-4sah.json"],
     ["New Orleans", "https://data.nola.gov/resource/72f9-bi28.json"],
-    ["Kansas City", "https://data.kcmo.org/resource/ue52-x8g8.json"],
+    // Kansas City pruned: ue52-x8g8 login-walled 2026-07-30, no successor.
     ["Orlando", "https://data.cityoforlando.net/resource/ryhf-m453.json"],
   ].map(([city, url]) => ({
     name: `${city} permit feed`,
@@ -204,16 +207,19 @@ const CHECKS = [
       // Region, Ontario). CvuPhqcTQpZPT9qY is the real City of Miami org.
       "https://services1.arcgis.com/CvuPhqcTQpZPT9qY/arcgis/rest/services/Building_Permits_Since_2014/FeatureServer/0",
       ["PermitNumber", "CompanyName"],
+      { dateField: "IssuedDate" },
     ],
     [
       "Nashville",
       "https://services2.arcgis.com/HdTo6HJqh92wn4D8/arcgis/rest/services/Building_Permits_Issued_2/FeatureServer/0",
       ["Permit__", "Date_Issued"],
+      { dateField: "Date_Issued" },
     ],
     [
       "Denver",
       "https://services1.arcgis.com/zdB7qR0BtYrg0Xpl/arcgis/rest/services/ODC_DEV_RESIDENTIALCONSTPERMIT_P/FeatureServer/316",
       ["PERMIT_NUM", "CONTRACTOR_NAME"],
+      { dateField: "DATE_ISSUED" },
     ],
     [
       "Portland",
@@ -221,17 +227,19 @@ const CHECKS = [
       // UA, the same way the app's in-browser fetch presents itself.
       "https://www.portlandmaps.com/arcgis/rest/services/Public/BDS_Permit/FeatureServer/22",
       ["APPLICATION", "ISSUED"],
-      { browserUa: true },
+      { browserUa: true, dateField: "ISSUED" },
     ],
     [
       "Washington DC",
       "https://maps2.dcgis.dc.gov/dcgis/rest/services/FEEDS/DCRA/FeatureServer/18",
       ["PERMIT_ID", "ISSUE_DATE"],
+      { dateField: "ISSUE_DATE" },
     ],
     [
       "Baltimore",
       "https://egisdata.baltimorecity.gov/egis/rest/services/Housing/DHCD_Open_Baltimore_Datasets/FeatureServer/3",
       ["CaseNumber", "IssuedDate"],
+      { dateField: "IssuedDate" },
     ],
     [
       "Sacramento",
@@ -242,55 +250,55 @@ const CHECKS = [
       "Boise",
       "https://services1.arcgis.com/WHM6qC35aMtyAAlN/arcgis/rest/services/Housing_OpenData/FeatureServer/0",
       ["IssuedDate"],
+      { dateField: "IssuedDate" },
     ],
     [
       "Minneapolis",
       "https://services.arcgis.com/afSMGVsC7QlRK1kZ/arcgis/rest/services/CCS_Permits/FeatureServer/0",
       ["permitNumber", "applicantName"],
+      { dateField: "issueDate" },
     ],
     [
       "Detroit",
       "https://services2.arcgis.com/qvkbeam7Wirps6zC/arcgis/rest/services/bseed_building_permits/FeatureServer/0",
       ["record_id", "issued_date"],
+      { dateField: "issued_date" },
     ],
     [
       "Columbus",
       "https://services1.arcgis.com/9yy6msODkIBzkUXU/arcgis/rest/services/Building_Permits/FeatureServer/0",
       ["B1_ALT_ID", "ISSUED_DT"],
+      { dateField: "ISSUED_DT" },
     ],
     [
       "Atlanta",
       "https://services5.arcgis.com/5RxyIIJ9boPdptdo/arcgis/rest/services/AMS_BuildingPermits/FeatureServer/66",
       ["RECORD_ID", "JOB_VALUE"],
+      { dateField: "DATE_OPENED" },
     ],
     [
       "Charlotte",
       "https://meckgis.mecklenburgcountync.gov/server/rest/services/BuildingPermits/FeatureServer/0",
       ["permitnum", "bldgcost"],
+      { dateField: "issuedate" },
     ],
     [
       "Raleigh",
       "https://services.arcgis.com/v400IkDOw1ad7Yad/arcgis/rest/services/Building_Permits/FeatureServer/0",
       ["permitnum", "contractorcompanyname"],
+      { dateField: "issueddate" },
     ],
     [
       "Tampa",
       "https://arcgis.tampagov.net/arcgis/rest/services/Planning/PermitsAll/MapServer/0",
       ["CREATEDDATE"],
+      { dateField: "CREATEDDATE" },
     ],
     [
       "Houston (Harris County, unincorporated)",
       "https://www.gis.hctx.net/arcgishcpid/rest/services/Permits/IssuedPermits/FeatureServer/0",
       ["PERMITNUMBER", "ISSUEDDATE"],
-    ],
-    [
-      "Houston (COH layer — unverified guess)",
-      // City of Houston publishes no confirmed open feed; the app tries this
-      // guess first, then falls through to Harris County. Warn-only: an
-      // error here is expected until a real COH feed is found.
-      "https://services.arcgis.com/su8ic9KbA7PYVxPS/arcgis/rest/services/COH_BUILDING_PERMITS/FeatureServer/0",
-      [],
-      { warnOnly: true },
+      { dateField: "ISSUEDDATE" },
     ],
   ].map(([city, layer, req, opts]) => ({
     name: `${city} permit feed (ArcGIS)`,
@@ -300,7 +308,15 @@ const CHECKS = [
       const headers = opts?.browserUa
         ? { "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36" }
         : undefined;
-      const data = await fetchJson(url, 3, headers);
+      // Sample newest-first on the layer's real date field so the freshness
+      // check measures the feed, not insertion order; fall back to an
+      // unordered sample when the server rejects the orderBy.
+      let data = null;
+      if (opts?.dateField) {
+        data = await fetchJson(`${url}&orderByFields=${encodeURIComponent(`${opts.dateField} DESC`)}`, 1, headers).catch(() => null);
+        if (data?.error || !(data?.features || []).length) data = null;
+      }
+      if (!data) data = await fetchJson(url, 3, headers);
       const feats = data.features || [];
       if (!feats.length) throw new Error(`no features (${JSON.stringify(data.error || data).slice(0, 160)})`);
       const a = feats[0].attributes || {};
@@ -323,7 +339,10 @@ const CHECKS = [
   ].map(([city, url]) => ({
     name: `${city} permit feed (CKAN)`,
     async run() {
-      const data = await fetchJson(`${url}&limit=10`);
+      // _id tracks datastore insertion order — "desc" approximates
+      // newest-first for the freshness check; fall back to unordered.
+      let data = await fetchJson(`${url}&limit=10&sort=_id desc`.replace(" desc", "%20desc"), 1).catch(() => null);
+      if (!data || data.success === false || !(data.result?.records || []).length) data = await fetchJson(`${url}&limit=10`);
       const recs = data.result?.records || [];
       if (data.success === false || !recs.length)
         throw new Error(`no records (${JSON.stringify(data.error || data).slice(0, 160)})`);
