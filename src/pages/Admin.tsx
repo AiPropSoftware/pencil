@@ -17,6 +17,9 @@ interface ProfileWithRole {
   full_name: string | null;
   created_at: string;
   role: Role;
+  phone?: string | null;
+  last_active?: string | null;
+  events_30d?: number | null;
 }
 
 const ROLES: Role[] = ["admin", "pro", "free"];
@@ -142,7 +145,10 @@ export default function Admin() {
                 <tr className="text-left text-muted-foreground border-b border-border">
                   <th className="py-2 pr-3 font-medium">Email</th>
                   <th className="py-2 px-3 font-medium">Name</th>
+                  <th className="py-2 px-3 font-medium">Phone</th>
                   <th className="py-2 px-3 font-medium">Joined</th>
+                  <th className="py-2 px-3 font-medium">Last active</th>
+                  <th className="py-2 px-3 font-medium">Actions (30d)</th>
                   <th className="py-2 px-3 font-medium">Role</th>
                   <th className="py-2 pl-3 font-medium" />
                 </tr>
@@ -157,9 +163,14 @@ export default function Admin() {
                         {isSelf && <span className="text-xs text-muted-foreground">(you)</span>}
                       </td>
                       <td className="py-3 px-3 text-muted-foreground">{u.full_name ?? "—"}</td>
+                      <td className="py-3 px-3 text-muted-foreground tabular-nums">{u.phone ?? "—"}</td>
                       <td className="py-3 px-3 text-muted-foreground tabular-nums">
                         {u.created_at.slice(0, 10)}
                       </td>
+                      <td className="py-3 px-3 text-muted-foreground tabular-nums">
+                        {u.last_active ? u.last_active.slice(0, 10) : "never"}
+                      </td>
+                      <td className="py-3 px-3 tabular-nums">{u.events_30d ?? 0}</td>
                       <td className="py-3 px-3">
                         <RoleBadge role={u.role} />
                       </td>

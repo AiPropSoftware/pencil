@@ -12,6 +12,7 @@ export default function SignUp() {
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [fullName, setFullName] = React.useState("");
+  const [phone, setPhone] = React.useState("");
   const [loading, setLoading] = React.useState(false);
 
   if (!isSupabaseConfigured()) {
@@ -49,7 +50,7 @@ export default function SignUp() {
       email,
       password,
       options: {
-        data: { full_name: fullName },
+        data: { full_name: fullName, phone },
         emailRedirectTo: `${window.location.origin}/map`,
       },
     });
@@ -71,14 +72,18 @@ export default function SignUp() {
       <Card>
         <CardHeader>
           <div className="gold-rule" />
-          <CardTitle className="mt-3 text-3xl">Create your free account</CardTitle>
-          <CardDescription>Full access to the live permit map, underwriting, and funding tools.</CardDescription>
+          <CardTitle className="mt-3 text-3xl">Join the Pencil beta — free</CardTitle>
+          <CardDescription>Full access to the live permit map, underwriting, and funding tools. No card required.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <form onSubmit={submit} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="name">Full name</Label>
               <Input id="name" required value={fullName} onChange={(e) => setFullName(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="phone">Phone</Label>
+              <Input id="phone" type="tel" required minLength={7} placeholder="(555) 555-5555" value={phone} onChange={(e) => setPhone(e.target.value)} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>

@@ -40,7 +40,9 @@ export function RequireAuth({ children, requireRole = "free" }: Props) {
   }
 
   if (!user) {
-    return <Navigate to="/sign-in" state={{ from: location.pathname }} replace />;
+    // Beta funnel: the front door is sign-UP (it links to sign-in for
+    // returning users) — the map and tools require an account.
+    return <Navigate to="/sign-up" state={{ from: location.pathname }} replace />;
   }
 
   const userRank = RANK[role ?? "free"];

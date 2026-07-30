@@ -19,6 +19,7 @@ export interface Database {
           email: string;
           full_name: string | null;
           avatar_url: string | null;
+          phone: string | null;
           created_at: string;
         };
         Insert: {
@@ -26,6 +27,7 @@ export interface Database {
           email: string;
           full_name?: string | null;
           avatar_url?: string | null;
+          phone?: string | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
@@ -35,6 +37,24 @@ export interface Database {
         Row: { id: string; user_id: string; role: Role; created_at: string };
         Insert: { id?: string; user_id: string; role: Role; created_at?: string };
         Update: Partial<Database["public"]["Tables"]["user_roles"]["Insert"]>;
+        Relationships: [];
+      };
+      usage_events: {
+        Row: {
+          id: number;
+          user_id: string;
+          event: string;
+          meta: Record<string, unknown>;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          user_id: string;
+          event: string;
+          meta?: Record<string, unknown>;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["usage_events"]["Insert"]>;
         Relationships: [];
       };
       permits: {
