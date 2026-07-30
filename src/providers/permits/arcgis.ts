@@ -30,6 +30,10 @@ export interface ArcgisCitySource {
    * dropped by the residential/new keyword filter — only obvious remodels.
    */
   residentialNewOnly?: boolean;
+  /** Server-side filter (e.g. "PRMT_TYPE = 101") for layers whose type field
+   * is a numeric code the text gates can't see. Dropped on retry if the
+   * server rejects it. */
+  where?: string;
 }
 
 export const ARCGIS_SOURCES: ArcgisCitySource[] = [
@@ -256,6 +260,39 @@ export const ARCGIS_SOURCES: ArcgisCitySource[] = [
     limit: 3000,
   },
   {
+    city: "Murfreesboro",
+    state: "TN",
+    candidates: [
+      // City GIS permits layer (points; PRMT_TYPE int codes, PRMT_DATE,
+      // ADD_NO/ST_NAME; active through 2026). AGOL mirror as fallback — the
+      // "Buiilding" double-i is the city's own typo, do not fix it.
+      "https://maps.murfreesborotn.gov/server/rest/services/BuildingCodes/Permits/MapServer/1",
+      "https://services5.arcgis.com/A5C0MR9xfkxVRwat/arcgis/rest/services/Buiilding_Permits/FeatureServer/0",
+    ],
+    // PRMT_TYPE is numeric (101 = residential) — invisible to the text gates,
+    // so scope server-side and let only the remodel keywords veto.
+    where: "PRMT_TYPE = 101",
+    residentialNewOnly: true,
+    metroPpsf: 200,
+    lat: 35.85,
+    lng: -86.39,
+    limit: 3000,
+  },
+  {
+    city: "Rutherford County",
+    state: "TN",
+    candidates: [
+      // County Building Codes server (unincorporated Rutherford only —
+      // Murfreesboro/Smyrna/La Vergne issue their own). Root: discovery
+      // finds the Permits layer from the live catalog.
+      "https://maps.rutherfordcountytn.gov/ags03",
+    ],
+    metroPpsf: 200,
+    lat: 35.84,
+    lng: -86.42,
+    limit: 3000,
+  },
+  {
     city: "Chattanooga",
     state: "TN",
     candidates: [
@@ -437,9 +474,9 @@ async function discoverPermitLayers(root: string, notes: string[]): Promise<stri
   return out.slice(0, 10);
 }
 
-async function queryLayer(layerUrl: string, limit: number): Promise<{ data: ArcgisResponse; url: string }> {
+async function queryLayer(layerUrl: string, limit: number, where?: string): Promise<{ data: ArcgisResponse; url: string }> {
   const params = new URLSearchParams({
-    where: "1=1",
+    where: where || "1=1",
     outFields: "*",
     outSR: "4326",
     f: "json",
@@ -449,11 +486,16 @@ async function queryLayer(layerUrl: string, limit: number): Promise<{ data: Arcg
   const url = `${layerUrl}/query?${params.toString()}`;
   let data = (await getJson(url)) as ArcgisResponse;
   if (data.error) {
-    // Hosted layers whose OID field isn't literally OBJECTID (FID, ESRI_OID…)
-    // reject the orderBy — retry unordered rather than losing the whole city.
+    // Degrade one clause at a time rather than losing the whole city:
+    // OID field isn't OBJECTID → drop orderBy; where field renamed → drop it.
     params.delete("orderByFields");
-    const retryUrl = `${layerUrl}/query?${params.toString()}`;
+    let retryUrl = `${layerUrl}/query?${params.toString()}`;
     data = (await getJson(retryUrl)) as ArcgisResponse;
+    if (data.error && where) {
+      params.set("where", "1=1");
+      retryUrl = `${layerUrl}/query?${params.toString()}`;
+      data = (await getJson(retryUrl)) as ArcgisResponse;
+    }
     if (data.error) throw new Error(`ArcGIS ${data.error.code ?? ""}: ${data.error.message ?? "error"}`);
     return { data, url: retryUrl };
   }
@@ -564,7 +606,7 @@ export async function fetchArcgisCity(src: ArcgisCitySource): Promise<CityResult
 
   for (const layer of layerUrls) {
     try {
-      const { data, url } = await queryLayer(layer, limit);
+      const { data, url } = await queryLayer(layer, limit, src.where);
       lastUrl = url;
       lastTotal = data.features?.length ?? 0;
       const norm = normalize(src, data);
