@@ -1,0 +1,68 @@
+name: Permit snapshot
+
+# Daily owner-controlled backup: exports the whole permits table to CSV and
+# commits it to the dedicated `data-snapshots` branch (kept off main so Vercel
+# never rebuilds over a data commit). Every day's state lives forever in git
+# history — even if the database vanished, the data is in YOUR repo.
+#
+# Shrink guard: refuses to commit a snapshot that lost >2% of rows vs. the
+# previous one — a backup of a broken read is worse than no backup.
+on:
+  schedule:
+    - cron: "30 12 * * *"   # daily, after the 12:00 ingest
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Export the store to CSV
+        run: |
+          set -o pipefail
+          npx --yes esbuild@0.24.2 scripts/snapshot-permits.ts \
+            --bundle --platform=node --format=esm --outfile=snapshot.mjs
+          node snapshot.mjs | tee snapshot-report.txt
+      - name: Commit to the data-snapshots branch
+        run: |
+          set -e
+          NEW_COUNT=$(($(wc -l < data/permits.csv) - 1))
+          git fetch origin data-snapshots || true
+          OLD_COUNT=$(git show origin/data-snapshots:data/permits.csv 2>/dev/null | tail -n +2 | wc -l || echo 0)
+          echo "rows: previous=$OLD_COUNT new=$NEW_COUNT"
+          if [ "$OLD_COUNT" -gt 0 ] && [ "$NEW_COUNT" -lt $((OLD_COUNT * 98 / 100)) ]; then
+            echo "::error::Snapshot shrank from $OLD_COUNT to $NEW_COUNT rows (>2%) — refusing to commit a suspicious backup."
+            exit 1
+          fi
+          mv data/permits.csv /tmp/permits.csv
+          if git rev-parse --verify origin/data-snapshots >/dev/null 2>&1; then
+            git checkout -B data-snapshots origin/data-snapshots
+          else
+            git checkout --orphan data-snapshots
+            git rm -rf --quiet . || true
+          fi
+          mkdir -p data
+          mv /tmp/permits.csv data/permits.csv
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/permits.csv
+          if git diff --cached --quiet; then
+            echo "Store unchanged since last snapshot — nothing to commit."
+          else
+            git commit -m "Permit snapshot: $NEW_COUNT rows ($(date -u +%F))"
+            git push origin data-snapshots
+          fi
+      - name: Publish summary
+        if: always()
+        run: |
+          echo '## Permit snapshot' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -c 6000 snapshot-report.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,45 @@
+name: Permit backfill
+
+# One-time historical sweep of a single pinned ArcGIS layer (default: Miami).
+# Pages the ENTIRE layer with an OID cursor and banks every new-residential
+# permit. The store is permanent and id-deduplicated, so a city's history only
+# ever needs this once; the daily ingest keeps it topped up afterward.
+on:
+  workflow_dispatch:
+    inputs:
+      city:
+        description: "City to backfill (must be an ArcGIS source with a pinned layer)"
+        default: "Miami"
+        required: true
+      max_pages:
+        description: "Hard page bound"
+        default: "400"
+        required: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Sweep the layer and bank permits
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BACKFILL_CITY: ${{ inputs.city }}
+          BACKFILL_MAX_PAGES: ${{ inputs.max_pages }}
+        run: |
+          set -o pipefail
+          npx --yes esbuild@0.24.2 scripts/backfill-permits.ts \
+            --bundle --platform=node --format=esm --outfile=backfill.mjs \
+            "--alias:@=./src" "--define:import.meta.env={}"
+          node backfill.mjs | tee backfill-report.txt
+      - name: Publish summary
+        if: always()
+        run: |
+          echo "## Permit backfill — ${{ inputs.city }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -c 12000 backfill-report.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
