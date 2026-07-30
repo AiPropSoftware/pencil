@@ -167,7 +167,7 @@ const CHECKS = [
     ["Seattle", "https://data.seattle.gov/resource/76t5-zqzr.json"],
     ["San Francisco", "https://data.sfgov.org/resource/i98e-djp9.json"],
     ["New York", "https://data.cityofnewyork.us/resource/ipu4-2q9a.json"],
-    ["Los Angeles", "https://data.lacity.org/resource/yv23-pmwf.json"],
+    ["Los Angeles", "https://data.lacity.org/resource/pi9x-tg5x.json"],
     ["Fort Worth", "https://data.fortworthtexas.gov/resource/quz7-xnsy.json"],
     ["Dallas", "https://www.dallasopendata.com/resource/e7gq-4sah.json"],
   ].map(([city, url]) => ({

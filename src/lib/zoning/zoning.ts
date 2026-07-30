@@ -65,9 +65,11 @@ export const CITY_ZONING: Record<string, CityZoning> = {
     // City of Austin "Zoning by Address" open dataset (same portal as our live
     // Austin permits feed) — address-matched zoning straight from the city.
     socrataZoning: "https://data.austintexas.gov/resource/nbzi-qabm.json",
-    // District polygons live in ZoningProfile (layer "Zoning") — NOT Shared/Zoning_2,
-    // which holds overlay layers only.
-    gisServer: "https://maps.austintexas.gov/arcgis/rest/services/ZoningProfile/ZoningProfile/MapServer",
+    // The city retired ZoningProfile (404, caught by the data canary). This is
+    // the pilot-verified base zoning layer (Shared/Zoning_1/0, ZONING_ZTYPE) —
+    // NOT Shared/Zoning_2, which holds overlay layers only. Canary-verified to
+    // answer inSR=4326 point queries with 120 ft tolerance.
+    gisServer: "https://maps.austintexas.gov/gis/rest/Shared/Zoning_1/MapServer/0",
     codeUrl: "https://library.municode.com/tx/austin/codes/land_development_code?nodeId=TIT25LADE_CH25-2ZO_SUBCHAPTER_CUSDERE_ART2PRUSDERE_DIV1RETA_S25-2-492SIDERE",
     codeName: "Austin LDC § 25-2-492 + HOME amendments (2023–24)",
     // Full § 25-2-492 dimensional table (all 31 base districts) encoded from
@@ -849,7 +851,32 @@ export async function zoneAtPoint(gisServer: string, lat: number, lng: number): 
     console.info("[Pencil] zone lookup:", msg, extra ?? "");
   };
   try {
-    // Accept either a service URL (…/MapServer) or a REST root to discover from.
+    // Accept a pinned layer URL (…/MapServer/0), a service URL (…/MapServer),
+    // or a REST root to discover from.
+    const layerUrl = gisServer.match(/^.*\/(?:Map|Feature)Server\/\d+$/) ? gisServer.replace(/\/$/, "") : null;
+    if (layerUrl) {
+      const q = new URLSearchParams({
+        geometry: `${lng},${lat}`,
+        geometryType: "esriGeometryPoint",
+        inSR: "4326",
+        spatialRel: "esriSpatialRelIntersects",
+        // Pilot-verified: geocodes sit on street centerlines outside zoning
+        // polygons — a 120 ft tolerance snaps to the fronting lot.
+        distance: "120",
+        units: "esriSRUnit_Foot",
+        outFields: "*",
+        returnGeometry: "false",
+        f: "json",
+      });
+      const data = (await getJson(`${layerUrl}/query?${q}`)) as {
+        features?: { attributes?: Record<string, unknown> }[];
+      };
+      const attrs = data.features?.[0]?.attributes;
+      if (!attrs) { diag("no district at point (pinned layer)", layerUrl); return null; }
+      const zone = pickZoneValue(attrs);
+      diag("hit", { layer: layerUrl, zone });
+      return zone;
+    }
     const services: string[] = [];
     if (/\/(Map|Feature)Server\/?$/.test(gisServer)) {
       services.push(gisServer.replace(/\/$/, ""));
