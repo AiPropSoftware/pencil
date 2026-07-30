@@ -29,7 +29,7 @@ export function GoogleMapView({
 }: {
   apiKey: string;
   pins: GPin[];
-  fly: { lat: number; lng: number } | null;
+  fly: { lat: number; lng: number; zoom?: number } | null;
   place: string;
   fitPoints: { lat: number; lng: number }[];
   /** Called once if Google's engine can't run (script blocked or key rejected). */
@@ -216,7 +216,7 @@ export function GoogleMapView({
     const map = mapRef.current;
     if (map && ready && fly) {
       map.panTo({ lat: fly.lat, lng: fly.lng });
-      map.setZoom(14);
+      map.setZoom(fly.zoom ?? 14);
     }
   }, [fly, ready]);
 

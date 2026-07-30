@@ -94,7 +94,7 @@ export default function MapPage() {
   const [visibleCount, setVisibleCount] = React.useState(PAGE);
   const [selected, setSelected] = React.useState<Selection>(null);
   const [dealsOnly, setDealsOnly] = React.useState(false);
-  const [fly, setFly] = React.useState<{ lat: number; lng: number } | null>(null);
+  const [fly, setFly] = React.useState<{ lat: number; lng: number; zoom?: number } | null>(null);
   const [basemap, setBasemap] = React.useState<"streets" | "satellite" | "google">("google");
 
   const [zoning, setZoning] = React.useState<null | { address: string; lotSqft?: number; autoRun?: boolean }>(null);
@@ -233,17 +233,24 @@ export default function MapPage() {
 
   const matchesPlace = (s: string) => place.trim() === "" || s.toLowerCase().includes(place.trim().toLowerCase());
 
-  // A query that starts with a house number is an address, not a city filter:
-  // fly there, re-scope the rail to its city, and X-ray the parcel.
+  // A query that starts with a house number is an address: fly there AND
+  // X-ray the parcel. Anything else (a city, a neighborhood, a county) still
+  // flies the map there — search must always visibly DO something.
   const addressShaped = /^\s*\d+[\w'-]*\s+\S+/.test(place);
   async function searchAddress() {
     const q = place.trim();
     if (!q) return;
     const geo = await geocodeAddress(GOOGLE_MAPS_KEY, q);
-    if (!geo) { toast.error("Couldn't locate that address — check the spelling."); return; }
-    setFly({ lat: geo.lat, lng: geo.lng });
-    if (geo.city) setPlace(`${geo.city}, ${geo.state}`);
-    setZoning({ address: geo.formatted, autoRun: true });
+    if (!geo) { toast.error("Couldn't locate that place — check the spelling."); return; }
+    if (addressShaped) {
+      setFly({ lat: geo.lat, lng: geo.lng, zoom: 16 });
+      if (geo.city) setPlace(`${geo.city}, ${geo.state}`);
+      setZoning({ address: geo.formatted, autoRun: true });
+    } else {
+      // City/area search: fly at city zoom and scope the rail to it.
+      setFly({ lat: geo.lat, lng: geo.lng, zoom: 11 });
+      if (geo.city) setPlace(`${geo.city}, ${geo.state}`);
+    }
   }
 
   const devMatches = React.useMemo(
@@ -335,14 +342,14 @@ export default function MapPage() {
               placeholder="Search a city — or paste an address and press Enter"
               value={place}
               onChange={(e) => setPlace(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && addressShaped) searchAddress(); }}
+              onKeyDown={(e) => { if (e.key === "Enter") searchAddress(); }}
             />
-            {addressShaped && (
+            {place.trim().length >= 3 && (
               <button
                 onClick={searchAddress}
                 className="absolute right-9 top-1/2 -translate-y-1/2 rounded bg-gold-muted px-2 py-0.5 text-[11px] font-medium text-foreground hover:bg-gold/30"
               >
-                X-ray ↵
+                {addressShaped ? "X-ray ↵" : "Go ↵"}
               </button>
             )}
             {place && <button onClick={() => setPlace("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>}
@@ -626,7 +633,7 @@ function DevCard({ d, selected, watched, onWatch, onClick }: { d: Development; s
           <div className="text-xs text-muted-foreground">{d.city}, {d.state} · {d.units}u · {d.status}</div>
           <div className="mt-1 text-xs text-muted-foreground">
             {d.sqftEstimated
-              ? `~${fmtNumber(d.buildingSqft)} sf (est. — not on permit)`
+              ? "size not published on the permit"
               : `${fmtNumber(d.buildingSqft)} sf building · ${fmtNumber(d.landSqft)} sf lot`}
           </div>
         </div>
@@ -986,7 +993,7 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
                       <div className="mt-2 space-y-0.5">
                         <Row label={`Sells for (ARV) @ $${fmtNumber(Math.round(mkt.current))}/sf`} value={fmtMoney(opp.arv)} />
                         <Row label={`Build cost @ $${fmtNumber(opp.buildPpsf)}/sf`} value={fmtMoney(opp.buildCost)} />
-                        <Row label={`Selling costs (${(opp.sellingPct * 100).toFixed(1)}%)`} value={fmtMoney(opp.sellingCosts)} />
+                        <Row label={`Selling costs — at sale (${(opp.sellingPct * 100).toFixed(1)}%)`} value={fmtMoney(opp.sellingCosts)} />
                         <Row label={`Construction financing (${opp.finMonths} mo model)`} value={fmtMoney(opp.financing)} />
                         <div className="flex items-center justify-between text-sm py-1 border-t border-border/60 mt-1 pt-1.5">
                           <span className="font-medium text-foreground">Supports land up to ({Math.round(opp.targetMargin * 100)}% margin)</span>
@@ -1271,7 +1278,7 @@ function InlineUnderwrite({
         <NumericField label="Months" value={months} onChange={setMonths} />
         <NumericField label="LTC" value={ltc} onChange={setLtc} percent suffix="%" />
         <NumericField label="Points" value={points} onChange={setPoints} percent suffix="%" />
-        <NumericField label="Closing" value={closingPct} onChange={setClosingPct} percent suffix="%" />
+        <NumericField label="Closing (buy)" value={closingPct} onChange={setClosingPct} percent suffix="%" />
       </div>
       {!ready && (
         <p className="mt-3 text-xs text-muted-foreground">Enter your land price and sell $/sf to underwrite this deal{sqft <= 0 ? " (and the sq ft you plan to build)" : ""}.</p>
@@ -1279,9 +1286,9 @@ function InlineUnderwrite({
       {ready && (
       <div className="mt-3 space-y-0.5">
         <Row label="Sells for (ARV)" value={fmtMoney(arv)} />
-        <Row label={`Selling costs (${sellingPctLabel}% realtor + closing)`} value={fmtMoney(deal.sellingCosts)} />
+        <Row label={`Selling costs — at sale (${sellingPctLabel}% realtor + sale closing)`} value={fmtMoney(deal.sellingCosts)} />
         <Row label="Hard construction" value={fmtMoney(deal.hardConstruction)} />
-        <Row label={`Closing costs (${pct(closingPct)}%)`} value={fmtMoney(deal.closingCosts)} />
+        <Row label={`Closing costs — purchase (${pct(closingPct)}%)`} value={fmtMoney(deal.closingCosts)} />
         <Row label={`Construction loan (${pct(ltc)}% LTC)`} value={fmtMoney(deal.constructionLoan)} />
         <Row label={`Lender fees (${pct(points)} pts)`} value={fmtMoney(deal.lenderFees)} />
         <Row label={`Total carry (${months} mo @ ${pct(rate)}%, ~${fmtMoney(deal.monthlyCarry)}/mo)`} value={fmtMoney(deal.totalCarry)} />
@@ -1418,6 +1425,49 @@ function ShareWatchRow({ id, watched, onWatch }: { id: string; watched: boolean;
   );
 }
 
+/** Is this permitted property on the market? We don't have a licensed feed for
+ * every MLS, so link out to the marketplaces' own search for the address —
+ * real listings, their data, one tap. */
+function ForSaleCheck({ address }: { address: string }) {
+  const q = encodeURIComponent(address);
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+      <span className="text-muted-foreground">Is it listed for sale?</span>
+      <a href={`https://www.zillow.com/homes/${q}_rb/`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-foreground hover:border-gold hover:text-gold">
+        Check Zillow <ExternalLink className="h-3 w-3" />
+      </a>
+      <a href={`https://www.realtor.com/realestateandhomes-search?searchQuery=${q}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-foreground hover:border-gold hover:text-gold">
+        Realtor.com <ExternalLink className="h-3 w-3" />
+      </a>
+    </div>
+  );
+}
+
+/** The pro forma is YOUR model, not this project's finances — keep it behind
+ * an explicit toggle so permit facts and modeled dollars never blur together. */
+function ModelToggle({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(false);
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="mt-4 flex w-full items-center justify-between rounded-md border border-border bg-secondary/30 px-4 py-3 text-sm text-foreground hover:border-gold"
+      >
+        <span className="inline-flex items-center gap-2"><Sparkles className="h-4 w-4 text-gold" /> Model a build like this one</span>
+        <span className="text-xs text-muted-foreground">your numbers, not this project's →</span>
+      </button>
+    );
+  }
+  return (
+    <div className="mt-4">
+      <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+        Your pro forma — modeled from area data, not this project's actual finances
+      </p>
+      {children}
+    </div>
+  );
+}
+
 function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development; watched: boolean; onWatch: () => void; onClose: () => void }) {
   const hasContractor = dev.developer && dev.developer !== "Permit holder on file";
   // Live ids embed the city permit number: live-<city>-<permitId>. The
@@ -1454,14 +1504,29 @@ function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development
 
         <StreetWalk lat={dev.lat} lng={dev.lng} />
 
+        {/* Only facts from the permit record — nothing invented. When the city
+            doesn't publish sizes, say so instead of estimating in a fact slot. */}
         <div className="mt-6 grid grid-cols-2 gap-3">
           <Metric icon={Building2} label="Units" value={fmtNumber(dev.units)} />
           <Metric icon={Layers3} label="Stories" value={fmtNumber(dev.stories)} />
-          <Metric icon={Ruler} label={dev.sqftEstimated ? "Land (est.)" : "Land"} value={`${dev.sqftEstimated ? "~" : ""}${fmtNumber(dev.landSqft)} sf`} />
-          <Metric icon={Ruler} label={dev.sqftEstimated ? "Building (est.)" : "Building"} value={`${dev.sqftEstimated ? "~" : ""}${fmtNumber(dev.buildingSqft)} sf`} />
+          {dev.sqftEstimated ? (
+            <div className="col-span-2 rounded-md border border-border bg-secondary/30 px-3 py-2 text-xs text-muted-foreground">
+              <Ruler className="mr-1.5 inline h-3.5 w-3.5" />
+              This city's dataset doesn't publish square footage on this record — no size is shown rather than a guess.
+            </div>
+          ) : (
+            <>
+              <Metric icon={Ruler} label="Land" value={`${fmtNumber(dev.landSqft)} sf`} />
+              <Metric icon={Ruler} label="Building" value={`${fmtNumber(dev.buildingSqft)} sf`} />
+            </>
+          )}
         </div>
 
-        <InlineUnderwrite city={dev.city} type={dev.productType} buildableSqft={dev.buildingSqft} address={`${dev.name}, ${dev.city}, ${dev.state}`} />
+        <ForSaleCheck address={`${dev.name}, ${dev.city}, ${dev.state}`} />
+
+        <ModelToggle>
+          <InlineUnderwrite city={dev.city} type={dev.productType} buildableSqft={dev.sqftEstimated ? 0 : dev.buildingSqft} address={`${dev.name}, ${dev.city}, ${dev.state}`} />
+        </ModelToggle>
 
         <FundingSection city={dev.city} state={dev.state} />
 
