@@ -52,6 +52,12 @@ Deno.serve(async (req) => {
     body.set("client_reference_id", user.id);
     body.set("subscription_data[metadata][supabase_user_id]", user.id);
     body.set("allow_promotion_codes", "true");
+    // 7-day free trial, no card up front: checkout skips payment collection,
+    // and a trial that ends without a card cancels cleanly instead of
+    // dangling as an incomplete subscription.
+    body.set("subscription_data[trial_period_days]", "7");
+    body.set("payment_method_collection", "if_required");
+    body.set("subscription_data[trial_settings][end_behavior][missing_payment_method]", "cancel");
     if (sub?.stripe_customer_id) {
       body.set("customer", sub.stripe_customer_id);
     } else {

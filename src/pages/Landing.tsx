@@ -175,6 +175,9 @@ export default function Landing() {
                 <Button size="lg" variant="outline" className="bg-transparent border-background/30 text-background hover:bg-background/10 hover:text-background" asChild>
                   <Link to="/map">Explore the live map</Link>
                 </Button>
+                <Button size="lg" variant="ghost" className="text-background/80 hover:bg-background/10 hover:text-background" asChild>
+                  <Link to="/pricing">See pricing</Link>
+                </Button>
               </div>
             </div>
           </CardContent>
