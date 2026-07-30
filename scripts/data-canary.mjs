@@ -331,17 +331,21 @@ const CHECKS = [
   // CKAN datastore permit feeds (Boston/WPRDC/San Jose/San Antonio/Milwaukee
   // run CKAN, not Socrata) — same recency policy, warn-only.
   ...[
-    ["Boston", "https://data.boston.gov/api/3/action/datastore_search?resource_id=6ddcd912-32a0-43df-9908-63574f8c7e77"],
+    // Optional third element: the resource's real date column — Boston's
+    // datastore is bulk-reloaded so _id order isn't chronological (run #11
+    // sampled 2023 rows); sorting by issued_date answers freshness for real.
+    ["Boston", "https://data.boston.gov/api/3/action/datastore_search?resource_id=6ddcd912-32a0-43df-9908-63574f8c7e77", "issued_date"],
     ["Pittsburgh", "https://data.wprdc.org/api/3/action/datastore_search?resource_id=f4d1177a-f597-4c32-8cbf-7885f56253f6"],
     ["San Jose", "https://data.sanjoseca.gov/api/3/action/datastore_search?resource_id=761b7ae8-3be1-4ad6-923d-c7af6404a904"],
     ["San Antonio", "https://data.sanantonio.gov/api/3/action/datastore_search?resource_id=c21106f9-3ef5-4f3a-8604-f992b4db7512"],
     ["Milwaukee", "https://data.milwaukee.gov/api/3/action/datastore_search?resource_id=828e9630-d7cb-42e4-960e-964eae916397"],
-  ].map(([city, url]) => ({
+  ].map(([city, url, dateField]) => ({
     name: `${city} permit feed (CKAN)`,
     async run() {
-      // _id tracks datastore insertion order — "desc" approximates
-      // newest-first for the freshness check; fall back to unordered.
-      let data = await fetchJson(`${url}&limit=10&sort=_id desc`.replace(" desc", "%20desc"), 1).catch(() => null);
+      // Sort by the real date column when known; otherwise _id desc
+      // (insertion order) approximates newest-first. Fall back to unordered.
+      const sortCol = dateField || "_id";
+      let data = await fetchJson(`${url}&limit=10&sort=${encodeURIComponent(`${sortCol} desc`)}`, 1).catch(() => null);
       if (!data || data.success === false || !(data.result?.records || []).length) data = await fetchJson(`${url}&limit=10`);
       const recs = data.result?.records || [];
       if (data.success === false || !recs.length)
