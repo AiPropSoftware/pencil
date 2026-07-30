@@ -106,6 +106,11 @@ export default function MapPage() {
   // Live multi-city permit feeds.
   const [live, setLive] = React.useState<LivePermits | null>(null);
 
+  // Permanent store (Supabase `permits`, topped up daily by the ingest
+  // workflow) — permits stay on the map even after a city API trims its
+  // window or breaks. Live rows win per-id; the store fills everything else.
+  const [stored, setStored] = React.useState<Development[]>([]);
+
   const [lastUpdated, setLastUpdated] = React.useState<number | null>(null);
   const [mlsListings, setMlsListings] = React.useState<Listing[]>([]);
 
@@ -152,6 +157,14 @@ export default function MapPage() {
       if (mls.length > 0) setMlsListings(mls);
     }).catch(() => {});
 
+    // Permanent permit store — one read per visit (the ingest tops it up daily).
+    import("@/providers/permits/store").then(({ fetchStoredPermits }) => fetchStoredPermits()).then((rows) => {
+      if (cancelled) return;
+      // eslint-disable-next-line no-console
+      console.info(`[Pencil] permit store: ${rows.length} stored permits`);
+      if (rows.length > 0) setStored(rows);
+    }).catch(() => {});
+
     return () => { cancelled = true; clearTimeout(kickoff); clearInterval(timer); };
   }, []);
 
@@ -167,13 +180,17 @@ export default function MapPage() {
   React.useEffect(() => { setVisibleCount(PAGE); }, [place, layer, typeFilter, kindFilter, dealsOnly, watchOnly]);
 
   const allDevs = React.useMemo(() => {
-    // Real public records only: live city feeds + on-demand discovery.
+    // Real public records only: live city feeds + on-demand discovery + the
+    // permanent store. Live rows win per-id (freshest fields); stored rows
+    // keep every permit ever ingested on the map.
     const base = live?.items ?? [];
     const extra = Object.values(discovered).flat();
-    if (extra.length === 0) return base;
     const ids = new Set(base.map((d) => d.id));
-    return [...base, ...extra.filter((d) => !ids.has(d.id))];
-  }, [live, discovered]);
+    const merged = [...base, ...extra.filter((d) => !ids.has(d.id))];
+    if (stored.length === 0) return merged;
+    for (const d of merged) ids.add(d.id);
+    return [...merged, ...stored.filter((d) => !ids.has(d.id))];
+  }, [live, discovered, stored]);
 
   // "What's new since your last visit" — the comeback hook.
   const [newCount, setNewCount] = React.useState(0);

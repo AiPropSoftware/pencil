@@ -37,6 +37,54 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["user_roles"]["Insert"]>;
         Relationships: [];
       };
+      permits: {
+        Row: {
+          id: string;
+          city: string;
+          state: string;
+          name: string;
+          developer: string;
+          lat: number;
+          lng: number;
+          product_type: string;
+          units: number;
+          land_sqft: number | null;
+          building_sqft: number | null;
+          stories: number | null;
+          status: string;
+          approved_date: string | null;
+          est_value: number | null;
+          price_per_sqft: number | null;
+          description: string;
+          sqft_estimated: boolean;
+          first_seen_at: string;
+          last_seen_at: string;
+        };
+        Insert: {
+          id: string;
+          city: string;
+          state: string;
+          name?: string;
+          developer?: string;
+          lat: number;
+          lng: number;
+          product_type?: string;
+          units?: number;
+          land_sqft?: number | null;
+          building_sqft?: number | null;
+          stories?: number | null;
+          status?: string;
+          approved_date?: string | null;
+          est_value?: number | null;
+          price_per_sqft?: number | null;
+          description?: string;
+          sqft_estimated?: boolean;
+          first_seen_at?: string;
+          last_seen_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["permits"]["Insert"]>;
+        Relationships: [];
+      };
       deals: {
         Row: {
           id: string;
