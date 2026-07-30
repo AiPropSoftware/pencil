@@ -13,6 +13,7 @@ import {
 } from "@/data/developments";
 import { LISTING_KINDS, LISTING_COLOR, type Listing, type ListingKind } from "@/data/listings";
 import { fetchAllCityDevelopments, type LivePermits } from "@/providers/permits/socrata";
+import { track } from "@/lib/track";
 import { fetchSoldRates } from "@/providers/sold/socrataSales";
 import { setLiveSaleRates } from "@/lib/underwrite/liveSaleRates";
 import { fetchMlsListings } from "@/providers/listings/mls";
@@ -113,6 +114,8 @@ export default function MapPage() {
 
   const [lastUpdated, setLastUpdated] = React.useState<number | null>(null);
   const [mlsListings, setMlsListings] = React.useState<Listing[]>([]);
+
+  React.useEffect(() => { track("map_view"); }, []);
 
   // Genuinely self-updating: refetch every 5 minutes so the LIVE dot is honest.
   React.useEffect(() => {
@@ -250,6 +253,7 @@ export default function MapPage() {
     const q = place.trim();
     if (!q) return;
     const geo = await geocodeAddress(GOOGLE_MAPS_KEY, q);
+    track("search", { q });
     if (!geo) { toast.error("Couldn't locate that place — check the spelling."); return; }
     if (addressShaped) {
       setFly({ lat: geo.lat, lng: geo.lng, zoom: 16 });
@@ -1460,6 +1464,7 @@ function ModelToggle({ children }: { children: React.ReactNode }) {
 }
 
 function DevelopmentPanel({ dev, watched, onWatch, onClose }: { dev: Development; watched: boolean; onWatch: () => void; onClose: () => void }) {
+  React.useEffect(() => { track("permit_open", { id: dev.id, city: dev.city }); }, [dev.id, dev.city]);
   const hasContractor = dev.developer && dev.developer !== "Permit holder on file";
   // Live ids embed the city permit number: live-<city>-<permitId>. The
   // lat/lng fallback key contains a comma — that's not a permit number.

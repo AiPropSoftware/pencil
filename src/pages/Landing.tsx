@@ -73,7 +73,7 @@ export default function Landing() {
                 </Link>
               </Button>
               <Button size="lg" variant="outline" asChild>
-                <Link to="/map">Explore the live map</Link>
+                <Link to="/sign-in">Sign in</Link>
               </Button>
             </div>
             <ul className="mt-10 grid sm:grid-cols-2 gap-x-6 gap-y-2.5">
@@ -173,7 +173,7 @@ export default function Landing() {
                   <Link to="/sign-up">Sign up free <ArrowRight className="h-4 w-4" /></Link>
                 </Button>
                 <Button size="lg" variant="outline" className="bg-transparent border-background/30 text-background hover:bg-background/10 hover:text-background" asChild>
-                  <Link to="/map">Explore the live map</Link>
+                  <Link to="/sign-in">Sign in</Link>
                 </Button>
                 <Button size="lg" variant="ghost" className="text-background/80 hover:bg-background/10 hover:text-background" asChild>
                   <Link to="/pricing">See pricing</Link>

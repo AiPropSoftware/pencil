@@ -1,4 +1,5 @@
 import * as React from "react";
+import { track } from "@/lib/track";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -27,6 +28,7 @@ import { useAuth } from "@/hooks/useAuth";
 const LS_KEY = "pencil:dealAnalyzer:draft";
 
 export default function DealAnalyzer() {
+  React.useEffect(() => { track("analyzer_view"); }, []);
   const { user } = useAuth();
   const [params] = useSearchParams();
   const [inputs, setInputs] = React.useState<DealInputs>(() => {

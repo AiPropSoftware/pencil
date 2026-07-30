@@ -6,6 +6,7 @@ import { TrialBanner } from "@/components/TrialBanner";
 import { Footer } from "@/components/Footer";
 import { Toaster } from "@/components/ui/toaster";
 import { RequireAuth } from "@/components/RequireAuth";
+import { track } from "@/lib/track";
 import MapPage from "@/pages/Map";
 import Landing from "@/pages/Landing";
 
@@ -26,6 +27,7 @@ const PageFallback = () => (
 );
 
 export default function App() {
+  React.useEffect(() => { track("session_start", {}, true); }, []);
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
@@ -36,12 +38,13 @@ export default function App() {
         <Routes>
           {/* Front door for visitors; signed-in users go straight to the map. */}
           <Route path="/" element={<Landing />} />
-          {/* Single surface: the map IS the app. */}
-          <Route path="/map" element={<MapPage />} />
+          {/* Single surface: the map IS the app — beta access requires a
+              free account (name/phone/email), so usage is trackable. */}
+          <Route path="/map" element={<RequireAuth><MapPage /></RequireAuth>} />
 
           {/* Drill-downs (reached from the map, not from any menu). */}
-          <Route path="/deal-analyzer" element={<DealAnalyzer />} />
-          <Route path="/library" element={<Library />} />
+          <Route path="/deal-analyzer" element={<RequireAuth><DealAnalyzer /></RequireAuth>} />
+          <Route path="/library" element={<RequireAuth><Library /></RequireAuth>} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/sign-in" element={<SignIn />} />
           <Route path="/sign-up" element={<SignUp />} />
