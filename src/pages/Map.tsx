@@ -231,7 +231,16 @@ export default function MapPage() {
     // If not found yet, retry when live data lands (effect re-runs on data).
   }, [allDevs, allListings]);
 
-  const matchesPlace = (s: string) => place.trim() === "" || s.toLowerCase().includes(place.trim().toLowerCase());
+  // Token match, not substring: the search box holds geocoder output like
+  // "Nashville, TN" while records read "Nashville TN" — a literal substring
+  // test fails on the comma and empties the whole map. Every token (word)
+  // must appear somewhere in the record's text instead.
+  const matchesPlace = (s: string) => {
+    const q = place.trim().toLowerCase();
+    if (q === "") return true;
+    const hay = s.toLowerCase();
+    return q.split(/[\s,]+/).filter(Boolean).every((t) => hay.includes(t));
+  };
 
   // A query that starts with a house number is an address: fly there AND
   // X-ray the parcel. Anything else (a city, a neighborhood, a county) still
