@@ -43,10 +43,10 @@ function FitOnPlace({ place, points }: { place: string; points: { lat: number; l
   return null;
 }
 
-function FlyToTarget({ target }: { target: { lat: number; lng: number } | null }) {
+function FlyToTarget({ target }: { target: { lat: number; lng: number; zoom?: number } | null }) {
   const map = useMap();
   React.useEffect(() => {
-    if (target) map.flyTo([target.lat, target.lng], 14, { duration: 0.8 });
+    if (target) map.flyTo([target.lat, target.lng], target.zoom ?? 14, { duration: 0.8 });
   }, [target, map]);
   return null;
 }
@@ -128,7 +128,7 @@ export default function LeafletMapView({
 }: {
   basemap: "streets" | "satellite";
   pins: LPin[];
-  fly: { lat: number; lng: number } | null;
+  fly: { lat: number; lng: number; zoom?: number } | null;
   place: string;
   fitPoints: { lat: number; lng: number }[];
 }) {

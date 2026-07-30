@@ -194,7 +194,7 @@ export default function DealAnalyzer() {
                     }}
                     suffix="sf"
                   />
-                  <NumericField label="Closing costs" value={inputs.closingCostsPct} onChange={(v) => set("closingCostsPct", v)} suffix="%" percent />
+                  <NumericField label="Closing costs — purchase" value={inputs.closingCostsPct} onChange={(v) => set("closingCostsPct", v)} suffix="%" percent hint="Title, escrow, and loan doc costs when you BUY the land and close the construction loan. Costs of selling are separate, under Sale." />
                   <NumericField label="Lender fees" value={inputs.lenderFeesPct} onChange={(v) => set("lenderFeesPct", v)} suffix="%" percent />
                   <NumericField label="Construction rate" value={inputs.constructionRate} onChange={(v) => set("constructionRate", v)} suffix="%" percent />
                   <NumericField label="Months to build" value={inputs.monthsToBuild} onChange={(v) => set("monthsToBuild", v)} suffix="mo" />
@@ -216,7 +216,7 @@ export default function DealAnalyzer() {
                   <div className="grid sm:grid-cols-2 gap-4 rounded-md border border-border bg-secondary/30 p-4">
                     <div className="sm:col-span-2 stat-label">Cost of selling</div>
                     <NumericField label="Realtor commission" value={inputs.salesCommissionPct} onChange={(v) => set("salesCommissionPct", v)} suffix="%" percent hint="Total agent commission on the sale price." />
-                    <NumericField label="Sale closing" value={inputs.saleClosingPct} onChange={(v) => set("saleClosingPct", v)} suffix="%" percent hint="Seller-side title, escrow, transfer tax." />
+                    <NumericField label="Closing costs — sale" value={inputs.saleClosingPct} onChange={(v) => set("saleClosingPct", v)} suffix="%" percent hint="Seller-side title, escrow, transfer tax — paid when you SELL, separate from the purchase closing above." />
                   </div>
                 )}
               </TabsContent>
@@ -313,7 +313,7 @@ function Results({ inputs, r, strategy }: { inputs: DealInputs; r: DealResults; 
         <CardHeader><CardTitle className="text-lg">Construction</CardTitle></CardHeader>
         <CardContent className="space-y-2">
           <Row label="Hard construction" value={fmtMoney(r.hardConstruction)} />
-          <Row label="Closing costs" value={fmtMoney(r.closingCosts)} />
+          <Row label="Closing costs — purchase" value={fmtMoney(r.closingCosts)} />
           <Row label="Construction loan" value={fmtMoney(r.constructionLoan)} />
           <Row label="Lender fees" value={fmtMoney(r.lenderFees)} />
           <Row label="Monthly carry" value={fmtMoney(r.monthlyCarry)} />
@@ -327,7 +327,8 @@ function Results({ inputs, r, strategy }: { inputs: DealInputs; r: DealResults; 
           <CardHeader><CardTitle className="text-lg">On sale</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             <Row label="Sale price (ARV)" value={fmtMoney(inputs.arv)} />
-            <Row label="Selling costs" value={fmtMoney(-r.sellingCosts)} />
+            <Row label={`Realtor commission (${(inputs.salesCommissionPct * 100).toFixed(1)}%)`} value={fmtMoney(-(inputs.arv * inputs.salesCommissionPct))} />
+            <Row label={`Closing costs — sale (${(inputs.saleClosingPct * 100).toFixed(1)}%)`} value={fmtMoney(-(inputs.arv * inputs.saleClosingPct))} />
             <Row label="Net sale proceeds" value={fmtMoney(r.netSaleProceeds)} />
             <Row label="All-in cost" value={fmtMoney(-r.allInCost)} />
             <Separator className="my-2" />
@@ -498,7 +499,7 @@ function localSummary(d: DealInputs, r: DealResults): string {
     `Prepared ${today}`,
     "",
     "THE PROJECT",
-    `${d.address || "The site"} is a proposed ${sqft} sf ground-up build. Total development cost is projected at ${fmtMoney(r.allInCost)}: ${fmtMoney(d.landCost)} for the land, ${fmtMoney(r.hardConstruction)} of hard construction (${fmtMoney(d.costPerSqft)}/sf), ${fmtMoney(r.closingCosts)} in closing costs, and ${fmtMoney(financingCosts)} of financing costs across a ${d.monthsToBuild}-month build.`,
+    `${d.address || "The site"} is a proposed ${sqft} sf ground-up build. Total development cost is projected at ${fmtMoney(r.allInCost)}: ${fmtMoney(d.landCost)} for the land, ${fmtMoney(r.hardConstruction)} of hard construction (${fmtMoney(d.costPerSqft)}/sf), ${fmtMoney(r.closingCosts)} in purchase closing costs, and ${fmtMoney(financingCosts)} of financing costs across a ${d.monthsToBuild}-month build.`,
     "",
     "CAPITAL PLAN",
     `The budget supports a ${fmtPct(d.ltcPct)} loan-to-cost construction loan of ${fmtMoney(r.constructionLoan)} at ${fmtPct(d.constructionRate)} interest-only (${fmtMoney(r.lenderFees)} in points, average carry ${fmtMoney(r.monthlyCarry)}/month). Sponsor cash required to close and carry the project is ${fmtMoney(r.cashRequired)}.`,
