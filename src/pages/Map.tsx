@@ -1371,14 +1371,20 @@ function FundingSection({ city, state }: { city: string; state: string }) {
               </span>
               <span className="block truncate text-xs text-muted-foreground">{ln.focus} · {ln.loans}</span>
             </span>
-            <Badge variant={ln.states === "nationwide" ? "secondary" : "gold"}>
-              {ln.states === "nationwide" ? "Nationwide" : `Lends in ${state}`}
+            <Badge variant={ln.footprint <= 12 ? "gold" : "secondary"}>
+              {ln.footprint <= 12
+                ? `Regional · ${state}`
+                : ln.footprint >= 51 ? "National program" : `Multi-state · ${state}`}
             </Badge>
           </a>
         ))}
       </div>
+      <p className="mt-1.5 text-[11px] text-muted-foreground leading-relaxed">
+        Ranked most-local first (smallest state footprint that covers {state}). Footprints from each
+        lender's own published pages — verify terms directly.
+      </p>
       <a href={lenderSearchUrl(city, state)} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-gold hover:underline">
-        Find local lenders in {city} <ExternalLink className="h-3 w-3" />
+        Find boutique local lenders in {city} <ExternalLink className="h-3 w-3" />
       </a>
     </Section>
   );
