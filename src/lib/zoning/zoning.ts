@@ -345,7 +345,10 @@ export const CITY_ZONING: Record<string, CityZoning> = {
   Chicago: {
     state: "IL",
     // City open-data zoning polygons ("Boundaries - Zoning Districts current").
-    socrataZoningGeo: { url: "https://data.cityofchicago.org/resource/7cve-jgbp.json", field: "zone_class" },
+    // 7cve-jgbp is the MAP visualization asset (no queryable rows since the
+    // portal's backend migration — caught by the data canary); dj47-wfun is
+    // the underlying tabular resource with the same zone_class field.
+    socrataZoningGeo: { url: "https://data.cityofchicago.org/resource/dj47-wfun.json", field: "zone_class" },
     codeUrl: "https://secondcityzoning.org/zoning_rules/",
     codeName: "Chicago Zoning Ordinance § 17-2 (residential district tables)",
     zones: [
@@ -1226,7 +1229,11 @@ const PARCEL_SOURCES: ParcelSource[] = [
     // LOT_SIZE units are per-record: LOT_UNITS "A" = acres, else square feet.
     match: (_c, s) => s === "MA",
     kind: "arcgis",
-    url: "https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/L3_TAXPAR_POLY_ASSESS_gdb/FeatureServer",
+    // MassGIS republished the L3 layer under this name in April 2026 (the old
+    // L3_TAXPAR_POLY_ASSESS_gdb service 400s — caught by the data canary).
+    // LOT_UNITS values are now spelled out ("Acres"/"Sq. Ft."); the acresValue
+    // match is prefix-based so both old "A" and new "Acres" convert.
+    url: "https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Property_Tax_Parcels/FeatureServer",
     source: "MassGIS L3 property tax parcels (all 351 municipalities)",
     lotField: { name: "LOT_SIZE", unit: "sqft", unitField: { name: "LOT_UNITS", acresValue: "A" } },
   },
@@ -1240,7 +1247,10 @@ const PARCEL_SOURCES: ParcelSource[] = [
   {
     match: (_c, s) => s === "NJ",
     kind: "arcgis",
-    url: "https://maps.nj.gov/arcgis/rest/services/Basemap/Parcels_NJ_WM/MapServer",
+    // NJGIN retired the maps.nj.gov composite (attributes stripped 2026-03 —
+    // caught by the data canary); the official Retired Services page names
+    // this AGOL service as the replacement carrying the MOD-IV attributes.
+    url: "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Parcels_Composite_NJ_WM/FeatureServer",
     source: "NJ statewide parcel composite (NJOGIS / MOD-IV)",
     lotField: { name: "CALC_ACRE", unit: "acres" },
   },
@@ -1373,7 +1383,8 @@ async function arcgisParcelAtPoint(serverUrl: string, lat: number, lng: number, 
             let acres = lotField.unit === "acres";
             if (lotField.unitField) {
               const uk = Object.keys(feat.attributes).find((k) => k.toLowerCase() === lotField.unitField!.name.toLowerCase());
-              acres = uk != null && String(feat.attributes[uk]).trim().toUpperCase() === lotField.unitField.acresValue.toUpperCase();
+              // Prefix match: MassGIS moved from "A" to spelled-out "Acres".
+              acres = uk != null && String(feat.attributes[uk]).trim().toUpperCase().startsWith(lotField.unitField.acresValue.toUpperCase());
             }
             lotSqft = saneLot(acres ? n * 43560 : n);
           }

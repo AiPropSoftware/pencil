@@ -34,7 +34,11 @@ export const ARCGIS_SOURCES: ArcgisCitySource[] = [
       // City of Miami "Building Permits Since 2014" — carries the contractor
       // (CompanyName), PermitNumber, IssuedDate, TotalSQFT straight from the
       // city's permitting system. County roots stay as fallback discovery.
-      "https://services6.arcgis.com/ONZht79c8QWuX759/arcgis/rest/services/Building_Permits/FeatureServer/0",
+      // NOTE: the previous services6/ONZht79c8QWuX759 URL was a FALSE POSITIVE
+      // (Peel Region, Ontario — serves housing-unit aggregates, a known trap
+      // in ArcGIS search; caught by the data canary). CvuPhqcTQpZPT9qY is the
+      // real City of Miami org.
+      "https://services1.arcgis.com/CvuPhqcTQpZPT9qY/arcgis/rest/services/Building_Permits_Since_2014/FeatureServer/0",
       "https://gisweb.miamidade.gov/arcgis", // confirmed reachable — discover its permit services
       "https://gis.miamidade.gov/arcgis",
     ],

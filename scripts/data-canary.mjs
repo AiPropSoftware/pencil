@@ -104,32 +104,20 @@ const CHECKS = [
     },
   },
   {
-    name: "Chicago zoning polygons point query (7cve-jgbp)",
+    name: "Chicago zoning polygons point query (dj47-wfun)",
     expectZone: "RT-4",
     async run() {
-      // The dataset migrated backends: .json rows come back keyless and
-      // zone_class errors. The .geojson rendition still exposes attribute
-      // names — discover the zone field + working geometry column from it.
-      const base = "https://data.cityofchicago.org/resource/7cve-jgbp";
-      const gj = await fetchJson(`${base}.geojson?$limit=1`);
-      const props = gj?.features?.[0]?.properties ?? {};
-      const fields = Object.keys(props);
-      const zoneField = fields.find((f) => /zone.*class|^zone$|zoning/i.test(f)) || fields.find((f) => /class/i.test(f));
-      if (!zoneField) throw new Error(`no zone-like field in geojson properties: ${fields.join(",").slice(0, 200) || "none"}`);
-      const point = "'POINT(-87.6776 41.9075)'";
-      let z = null;
-      let via = null;
-      for (const geomCol of ["the_geom", "geometry"]) {
-        try {
-          const hit = await fetchJson(`${base}.geojson?$where=` + encodeURIComponent(`intersects(${geomCol}, ${point})`) + "&$limit=1", 1);
-          const p = hit?.features?.[0]?.properties;
-          if (p && p[zoneField]) { z = p[zoneField]; via = geomCol; break; }
-        } catch {}
-      }
-      if (!z) throw new Error(`point query failed with both geometry column names (zone field discovered: ${zoneField}; all fields: ${fields.join(",").slice(0, 160)})`);
-      const detail = `zone ${z} via field "${zoneField}" + geometry column "${via}" (.geojson rendition) — repoint the app accordingly`;
-      if (z !== this.expectZone) return { warn: `${detail}; drift: expected ${this.expectZone}` };
-      return detail;
+      // 7cve-jgbp turned out to be the MAP visualization asset (no queryable
+      // rows); dj47-wfun is the underlying tabular resource the app queries.
+      const url =
+        "https://data.cityofchicago.org/resource/dj47-wfun.json?$select=zone_class&$where=" +
+        encodeURIComponent("intersects(the_geom, 'POINT(-87.6776 41.9075)')");
+      const rows = await fetchJson(url);
+      if (!Array.isArray(rows) || !rows.length || !rows[0].zone_class)
+        throw new Error(`no zone_class for known point (${JSON.stringify(rows).slice(0, 140)})`);
+      const z = rows[0].zone_class;
+      if (z !== this.expectZone) return { warn: `zone drift at test point: expected ${this.expectZone}, got ${z} — rezoning? re-verify` };
+      return `zone_class ${z} at test point (dj47-wfun)`;
     },
   },
   {
@@ -203,32 +191,23 @@ const CHECKS = [
     },
   })),
   {
-    name: "Miami permit feed (city ArcGIS Building_Permits)",
+    name: "Miami permit feed (City of Miami Building_Permits_Since_2014)",
     async run() {
-      // The Building_Permits service was repurposed to census aggregates
-      // (run #2). Hunt the whole City of Miami AGOL org for the service that
-      // still holds permit RECORDS (PermitNumber + CompanyName).
-      const org = "https://services6.arcgis.com/ONZht79c8QWuX759/arcgis/rest/services";
-      const list = await fetchJson(`${org}?f=json`);
-      const cands = (list.services || []).filter((s) => /permit/i.test(s.name)).slice(0, 8);
-      if (!cands.length) throw new Error(`no permit-named services in the org (${(list.services || []).length} services total)`);
-      const seen = [];
-      for (const s of cands) {
-        const root = `${org}/${s.name}/${s.type}`;
-        const svc = await fetchJson(`${root}?f=json`).catch(() => null);
-        for (const l of [...(svc?.layers || []), ...(svc?.tables || [])].slice(0, 4)) {
-          const meta = await fetchJson(`${root}/${l.id}?f=json`).catch(() => null);
-          const names = (meta?.fields || []).map((f) => f.name);
-          if (names.includes("PermitNumber") && names.includes("CompanyName")) {
-            const q = await fetchJson(`${root}/${l.id}/query?where=1%3D1&outFields=*&resultRecordCount=3&returnGeometry=false&f=json`).catch(() => null);
-            if ((q?.features || []).length) return `record layer found: ${root}/${l.id} ("${s.name}"/"${l.name}") — adopt in arcgis.ts`;
-            seen.push(`${s.name}/${l.id}(fields ok, no rows)`);
-          } else {
-            seen.push(`${s.name}/${l.id}:${l.name}[${names.slice(0, 3).join("/")}]`);
-          }
-        }
-      }
-      throw new Error(`no PermitNumber+CompanyName layer among permit-named services — scanned: ${seen.join("; ").slice(0, 320)}`);
+      // The old services6/ONZht79c8QWuX759 URL was a false positive (Peel
+      // Region, Ontario — housing-unit aggregates). This is the real City of
+      // Miami org's per-record permits layer.
+      const url =
+        "https://services1.arcgis.com/CvuPhqcTQpZPT9qY/arcgis/rest/services/Building_Permits_Since_2014/FeatureServer/0/query" +
+        "?where=1%3D1&outFields=PermitNumber,CompanyName,IssuedDate,TotalSQFT&resultRecordCount=10&orderByFields=IssuedDate%20DESC&returnGeometry=false&f=json";
+      const data = await fetchJson(url);
+      const feats = data.features || [];
+      if (!feats.length) throw new Error(`no features (${JSON.stringify(data.error || data).slice(0, 160)})`);
+      const a = feats[0].attributes || {};
+      if (!("PermitNumber" in a) || !("CompanyName" in a)) throw new Error(`expected fields missing: ${Object.keys(a).join(",").slice(0, 160)}`);
+      const newest = newestDate(feats.map((f) => f.attributes));
+      if (newest && Date.now() - newest > 120 * DAY_MS)
+        return { warn: `newest IssuedDate ${new Date(newest).toISOString().slice(0, 10)} — stale?` };
+      return `${feats.length} permits, newest ${newest ? new Date(newest).toISOString().slice(0, 10) : "n/a"}`;
     },
   },
   {
@@ -251,7 +230,17 @@ const CHECKS = [
         const q = await fetchJson(`${layerUrl}/query?where=1%3D1&outFields=*&resultRecordCount=3&returnGeometry=false&f=json`).catch((e) => ({ err: String(e.message).slice(0, 60) }));
         if ((q.features || []).length) {
           const fields = Object.keys(q.features[0].attributes || {});
-          return `dataset "${d.title}" → ${layerUrl} (fields: ${fields.slice(0, 10).join(",")}) — adopt as the FW source`;
+          // Also report the BLDS Socrata mirror's health — a drop-in for the
+          // app's existing Socrata pipeline if it's fresh.
+          let mirror = "";
+          try {
+            const rows = await fetchJson("https://permits.partner.socrata.com/resource/qy5k-jz7m.json?$limit=10", 1);
+            const newest = newestDate(rows || []);
+            mirror = `; BLDS mirror qy5k-jz7m: ${Array.isArray(rows) ? rows.length : 0} rows, newest ${newest ? new Date(newest).toISOString().slice(0, 10) : "n/a"}`;
+          } catch (e) {
+            mirror = `; BLDS mirror unreachable (${String(e.message).slice(0, 50)})`;
+          }
+          return `dataset "${d.title}" → ${layerUrl} (fields: ${fields.slice(0, 10).join(",")}) — adopt as the FW source${mirror}`;
         }
         notes.push(`"${d.title}": ${q.err || JSON.stringify(q.error || {}).slice(0, 60)}`);
       }
@@ -311,7 +300,32 @@ const CHECKS = [
           errors.push(`${root}: ${String(e.message).slice(0, 90)}`);
         }
       }
-      throw new Error(`all candidates failed — ${errors.join(" | ").slice(0, 450)}`);
+      // The tiled "most_recent" MapServer may have query disabled — the
+      // identify operation often still works on it.
+      try {
+        const mr = "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer";
+        const [lng, lat, d] = [-96.9561, 32.5885, 0.002];
+        const idUrl =
+          `${mr}/identify?geometry=${lng},${lat}&geometryType=esriGeometryPoint&sr=4326&layers=all:0&tolerance=2` +
+          `&mapExtent=${lng - d},${lat - d},${lng + d},${lat + d}&imageDisplay=400,400,96&returnGeometry=false&f=json`;
+        const idData = await fetchJson(idUrl);
+        const attrs = idData.results?.[0]?.attributes;
+        if (attrs) {
+          const acreEntry = Object.entries(attrs).find(
+            ([k, v]) => /acre|gis_area|lgl_area/i.test(k) && Number(v) > 0.005 && Number(v) < 5000,
+          );
+          return {
+            warn:
+              `query op disabled but IDENTIFY works on ${mr} — ` +
+              `${acreEntry ? `${acreEntry[0]}=${acreEntry[1]}` : `fields: ${Object.keys(attrs).join(",").slice(0, 100)}`}` +
+              `; the app needs an identify fallback to use this service`,
+          };
+        }
+        errors.push(`identify: no result (${JSON.stringify(idData.error || {}).slice(0, 80)})`);
+      } catch (e) {
+        errors.push(`identify: ${String(e.message).slice(0, 80)}`);
+      }
+      throw new Error(`all candidates failed — ${errors.join(" | ").slice(0, 500)}`);
     },
   },
   {
@@ -343,7 +357,9 @@ const CHECKS = [
       // The L3_TAXPAR_POLY_ASSESS_gdb service vanished ("Invalid URL",
       // run #2) — scan the MassGIS AGOL org for the renamed successor.
       const org = "https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services";
-      const roots = ["https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/L3_TAXPAR_POLY_ASSESS_gdb/FeatureServer"];
+      // Canonical successor (announced by MassGIS ~2026-04) first, then the
+      // org scan for future renames.
+      const roots = ["https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Property_Tax_Parcels/FeatureServer"];
       const list = await fetchJson(`${org}?f=json`).catch(() => null);
       roots.push(
         ...(list?.services || [])
@@ -357,8 +373,11 @@ const CHECKS = [
         for (const l of [...(svc?.layers || []), ...(svc?.tables || [])].slice(0, 5)) {
           const meta = await fetchJson(`${root}/${l.id}?f=json`).catch(() => null);
           const names = (meta?.fields || []).map((f) => f.name.toUpperCase());
-          if (names.includes("LOT_SIZE") && names.includes("LOT_UNITS"))
-            return `fields present: ${root}/${l.id} ("${l.name}") — adopt this URL if it differs from the app's`;
+          if (names.includes("LOT_SIZE") && names.includes("LOT_UNITS")) {
+            const q = await fetchJson(`${root}/${l.id}/query?where=1%3D1&outFields=LOT_SIZE,LOT_UNITS&resultRecordCount=1&returnGeometry=false&f=json`).catch(() => null);
+            const s = q?.features?.[0]?.attributes;
+            return `fields present: ${root}/${l.id} ("${l.name}")${s ? ` — sample LOT_SIZE=${s.LOT_SIZE} LOT_UNITS="${s.LOT_UNITS}"` : ""}`;
+          }
           seen.push(`${root.split("/services/")[1]}/${l.id}`);
         }
       }
@@ -372,6 +391,9 @@ const CHECKS = [
       // the FeatureServer sibling, then scan maps.nj.gov for a parcel
       // service that still carries CALC_ACRE.
       const roots = [
+        // Official replacement per NJGIN's Retired Services page (the
+        // maps.nj.gov composite was stripped/retired 2026-03).
+        "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Parcels_Composite_NJ_WM/FeatureServer",
         "https://maps.nj.gov/arcgis/rest/services/Basemap/Parcels_NJ_WM/FeatureServer",
         "https://maps.nj.gov/arcgis/rest/services/Basemap/Parcels_NJ_WM/MapServer",
       ];
