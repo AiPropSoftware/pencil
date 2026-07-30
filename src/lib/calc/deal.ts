@@ -13,6 +13,12 @@ export interface DealInputs {
   costPerSqft: number;
   totalSqft: number;
   closingCostsPct: number;     // % of (land + hard cost)
+
+  // Advanced (opt-in — all default 0, so the simple flow is unchanged)
+  softCostsPct: number;        // A&E/permits/impact fees as % of hard cost
+  softCostsFlat: number;       // plus a flat soft-cost amount ($)
+  contingencyPct: number;      // % of hard cost held as contingency
+  carryOtherMo: number;        // taxes+insurance+utilities per month during build
   lenderFeesPct: number;       // % of construction loan
   constructionRate: number;    // annual rate, decimal
   monthsToBuild: number;
@@ -52,6 +58,10 @@ export const defaultDeal: DealInputs = {
   costPerSqft: 220,
   totalSqft: 3200,
   closingCostsPct: 0.02,
+  softCostsPct: 0,
+  softCostsFlat: 0,
+  contingencyPct: 0,
+  carryOtherMo: 0,
   lenderFeesPct: 0.02,
   constructionRate: 0.115, // 2026 ground-up hard-money average (published range 11–15%)
   monthsToBuild: 10,
@@ -84,6 +94,9 @@ export const defaultDeal: DealInputs = {
 export interface DealResults {
   // Project / construction
   hardConstruction: number;
+  softCosts: number;            // 0 unless advanced inputs used
+  contingency: number;          // 0 unless advanced inputs used
+  otherCarry: number;           // 0 unless advanced inputs used
   closingCosts: number;
   totalDevCostBeforeFinancing: number;
   constructionLoan: number;
@@ -146,7 +159,9 @@ function constructionCarry(loan: number, rate: number, months: number): number {
 
 export function calcDeal(d: DealInputs): DealResults {
   const hardConstruction = d.costPerSqft * d.totalSqft;
-  const projectBase = d.landCost + hardConstruction;
+  const softCosts = hardConstruction * (d.softCostsPct ?? 0) + (d.softCostsFlat ?? 0);
+  const contingency = hardConstruction * (d.contingencyPct ?? 0);
+  const projectBase = d.landCost + hardConstruction + softCosts + contingency;
   const closingCosts = projectBase * d.closingCostsPct;
   const totalDevCostBeforeFinancing = projectBase + closingCosts;
 
@@ -155,7 +170,8 @@ export function calcDeal(d: DealInputs): DealResults {
   const totalCarry = constructionCarry(constructionLoan, d.constructionRate, d.monthsToBuild);
   const monthlyCarry = d.monthsToBuild > 0 ? totalCarry / d.monthsToBuild : 0;
 
-  const allInCost = totalDevCostBeforeFinancing + lenderFees + totalCarry;
+  const otherCarry = (d.carryOtherMo ?? 0) * d.monthsToBuild;
+  const allInCost = totalDevCostBeforeFinancing + lenderFees + totalCarry + otherCarry;
   const cashRequired = allInCost - constructionLoan;
   const sellingCosts = d.applySellingCosts ? d.arv * (d.salesCommissionPct + d.saleClosingPct) : 0;
   const netSaleProceeds = d.arv - sellingCosts;
@@ -198,6 +214,9 @@ export function calcDeal(d: DealInputs): DealResults {
 
   return {
     hardConstruction,
+    softCosts,
+    contingency,
+    otherCarry,
     closingCosts,
     totalDevCostBeforeFinancing,
     constructionLoan,

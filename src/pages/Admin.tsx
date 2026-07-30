@@ -20,6 +20,7 @@ interface ProfileWithRole {
   phone?: string | null;
   last_active?: string | null;
   events_30d?: number | null;
+  active_days?: number | null;
 }
 
 const ROLES: Role[] = ["admin", "pro", "free"];
@@ -148,6 +149,7 @@ export default function Admin() {
                   <th className="py-2 px-3 font-medium">Phone</th>
                   <th className="py-2 px-3 font-medium">Joined</th>
                   <th className="py-2 px-3 font-medium">Last active</th>
+                  <th className="py-2 px-3 font-medium">Days used</th>
                   <th className="py-2 px-3 font-medium">Actions (30d)</th>
                   <th className="py-2 px-3 font-medium">Role</th>
                   <th className="py-2 pl-3 font-medium" />
@@ -170,6 +172,7 @@ export default function Admin() {
                       <td className="py-3 px-3 text-muted-foreground tabular-nums">
                         {u.last_active ? u.last_active.slice(0, 10) : "never"}
                       </td>
+                      <td className="py-3 px-3 tabular-nums">{u.active_days ?? 0}</td>
                       <td className="py-3 px-3 tabular-nums">{u.events_30d ?? 0}</td>
                       <td className="py-3 px-3">
                         <RoleBadge role={u.role} />

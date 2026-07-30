@@ -27,7 +27,10 @@ const PageFallback = () => (
 );
 
 export default function App() {
-  React.useEffect(() => { track("session_start", {}, true); }, []);
+  React.useEffect(() => {
+    track("session_start", {}, "session");
+    track("day_ping", {}, "day"); // one event per active calendar day, guaranteed
+  }, []);
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
