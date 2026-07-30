@@ -42,6 +42,14 @@ function coordsFrom(row: Record<string, unknown>): { lat: number; lng: number } 
         const lo = parseFloat(m[1]), la = parseFloat(m[2]);
         if (Number.isFinite(la) && Number.isFinite(lo)) return { lat: la, lng: lo };
       }
+      // Bare "37.33, -121.89" pairs: magnitude decides which is latitude;
+      // the city-center sanity check downstream drops any wrong guess.
+      const pair = v.match(/(-?\d{1,3}\.\d+)[,\s]+(-?\d{1,3}\.\d+)/);
+      if (pair) {
+        const a = parseFloat(pair[1]), b = parseFloat(pair[2]);
+        if (Math.abs(a) <= 90 && Math.abs(b) > 90 && Math.abs(b) <= 180) return { lat: a, lng: b };
+        if (Math.abs(b) <= 90 && Math.abs(a) > 90 && Math.abs(a) <= 180) return { lat: b, lng: a };
+      }
       try { v = JSON.parse(v) as Record<string, unknown>; } catch { continue; }
     }
     if (!v || typeof v !== "object") continue;
@@ -97,6 +105,9 @@ export interface CitySource {
    * real date column when insertion order isn't chronological (Boston). */
   ckanSort?: string;
   where?: string;       // optional SoQL filter to boost new-construction yield
+  /** socrata only: $order override (default ":id DESC") — the dataset's real
+   * date column, for portals whose :id order isn't chronological. */
+  order?: string;
 }
 
 /**
@@ -108,15 +119,15 @@ export const CITY_SOURCES: CitySource[] = [
   // Probe-verified enum values ("work_class = 'New'" etc.) narrow each fetch
   // to new construction server-side; the retry ladder falls back to the plain
   // query if a portal ever renames the column.
-  { city: "Austin", state: "TX", url: "https://data.austintexas.gov/resource/3syk-w9eu.json", metroPpsf: 390, lat: 30.27, lng: -97.74, limit: 8000, where: "work_class = 'New'" },
+  { city: "Austin", state: "TX", url: "https://data.austintexas.gov/resource/3syk-w9eu.json", metroPpsf: 390, lat: 30.27, lng: -97.74, limit: 8000, where: "work_class = 'New'", order: "issued_date DESC" },
   { city: "Chicago", state: "IL", url: "https://data.cityofchicago.org/resource/ydr8-5enu.json", metroPpsf: 360, lat: 41.88, lng: -87.63, limit: 6000, where: "permit_type='PERMIT - NEW CONSTRUCTION'" },
   { city: "Seattle", state: "WA", url: "https://data.seattle.gov/resource/76t5-zqzr.json", metroPpsf: 660, lat: 47.61, lng: -122.33, limit: 6000, where: "permittypedesc = 'New'" },
   { city: "San Francisco", state: "CA", url: "https://data.sfgov.org/resource/i98e-djp9.json", metroPpsf: 1150, lat: 37.77, lng: -122.42, limit: 6000, where: "lower(permit_type_definition) LIKE '%new construction%'" },
-  { city: "New York", state: "NY", url: "https://data.cityofnewyork.us/resource/ipu4-2q9a.json", metroPpsf: 760, lat: 40.71, lng: -74.01, limit: 6000, where: "permit_type = 'NB'" },
+  { city: "New York", state: "NY", url: "https://data.cityofnewyork.us/resource/ipu4-2q9a.json", metroPpsf: 760, lat: 40.71, lng: -74.01, limit: 6000, where: "permit_type = 'NB'", order: "issuance_date DESC" },
   // LADBS retired yv23-pmwf ("…Old", login-walled 2026-07, caught by the data
   // canary); pi9x-tg5x is the current "Building Permits Issued from 2020 to
   // Present" dataset. "Bldg-New" is its verified new-building enum.
-  { city: "Los Angeles", state: "CA", url: "https://data.lacity.org/resource/pi9x-tg5x.json", metroPpsf: 780, lat: 34.05, lng: -118.24, limit: 6000, where: "permit_type = 'Bldg-New'" },
+  { city: "Los Angeles", state: "CA", url: "https://data.lacity.org/resource/pi9x-tg5x.json", metroPpsf: 780, lat: 34.05, lng: -118.24, limit: 6000, where: "permit_type = 'Bldg-New'", order: "issue_date DESC" },
   { city: "Fort Worth", state: "TX", url: "https://data.fortworthtexas.gov/resource/quz7-xnsy.json", metroPpsf: 210, lat: 32.75, lng: -97.33, limit: 5000 },
   // Dallas "Building Permits" (e7gq-4sah) carries no coordinates — "Permit
   // Points" (6ik7-4gqj) is the geocoded sibling (the_geom).
@@ -225,16 +236,23 @@ export async function fetchCityDevelopments(src: CitySource, limitOverride?: num
 
   // Retry ladder: (where + order) -> (order) -> (plain). A wrong column in
   // where/order makes Socrata reject the whole query, so degrade gracefully.
+  // Custom date-column orders get a :id fallback before dropping the where.
   const variants: URLSearchParams[] = [];
+  const orders = src.order ? [src.order, ":id DESC"] : [":id DESC"];
   if (src.where) {
+    for (const o of orders) {
+      const v = new URLSearchParams(base);
+      v.set("$where", src.where);
+      v.set("$order", o);
+      variants.push(v);
+    }
+  }
+  for (const o of orders) {
     const v = new URLSearchParams(base);
-    v.set("$where", src.where);
-    v.set("$order", ":id DESC");
+    v.set("$order", o);
     variants.push(v);
   }
-  const ordered = new URLSearchParams(base);
-  ordered.set("$order", ":id DESC");
-  variants.push(ordered, base);
+  variants.push(base);
 
   let url = `${src.url}?${variants[0].toString()}`;
 
@@ -278,10 +296,10 @@ function normalizeRows(src: CitySource, rows: Record<string, unknown>[], url: st
     const tooCoarse = (n: number) => Math.abs(n * 1000 - Math.round(n * 1000)) < 1e-9;
     if (tooCoarse(coords.lat) && tooCoarse(coords.lng)) continue;
 
-    const typeDesc = String(pick(r, ["permit_type_desc", "permit_type", "permittype", "permit_type_definition", "permittypedesc", "permit_type_description"]) ?? "");
-    const pclass = String(pick(r, ["permit_class", "permit_class_mapped", "permitclass", "permitclassmapped", "permit_sub_type", "occupancytype"]) ?? "");
+    const typeDesc = String(pick(r, ["permit_type_desc", "permit_type", "permittype", "permit_type_definition", "permittypedesc", "permit_type_description", "application_type"]) ?? "");
+    const pclass = String(pick(r, ["permit_class", "permit_class_mapped", "permitclass", "permitclassmapped", "permit_sub_type", "occupancytype", "landuse", "lu", "topcat"]) ?? "");
     const work = String(pick(r, ["work_class", "work_type", "job_type", "worktype", "typeofwork", "WORK TYPE", "Permit Type"]) ?? "");
-    const desc = String(pick(r, ["description", "work_description", "work_desc", "purpose", "job_description", "proposed_use", "use_desc", "permitdescription", "approvedscopeofwork", "WORKDESCRIPTION", "PROJECT NAME"]) ?? "");
+    const desc = String(pick(r, ["description", "descr", "work_description", "work_desc", "activity", "purpose", "job_description", "proposed_use", "use_desc", "permitdescription", "approvedscopeofwork", "WORKDESCRIPTION", "PROJECT NAME", "project_name"]) ?? "");
     const blob = `${typeDesc} ${pclass} ${work} ${desc}`;
     const residentialFlag = String(pick(r, ["residential"]) ?? "").toLowerCase();
 

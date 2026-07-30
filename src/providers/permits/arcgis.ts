@@ -218,10 +218,10 @@ export const ARCGIS_SOURCES: ArcgisCitySource[] = [
     city: "Atlanta",
     state: "GA",
     candidates: [
-      // AMS building permits layer 66: RECORD_ID, DATE_OPENED, JOB_VALUE,
-      // Latitude/Longitude; "latest" layer as fallback.
-      "https://services5.arcgis.com/5RxyIIJ9boPdptdo/arcgis/rest/services/AMS_BuildingPermits/FeatureServer/66",
+      // "latest" layer first — the AMS layer 66 only serves a ~50-row window
+      // (probe 2026-07-30), so it demotes to fallback.
       "https://services5.arcgis.com/5RxyIIJ9boPdptdo/arcgis/rest/services/Building_Permit_latest/FeatureServer/0",
+      "https://services5.arcgis.com/5RxyIIJ9boPdptdo/arcgis/rest/services/AMS_BuildingPermits/FeatureServer/66",
     ],
     metroPpsf: 242,
     lat: 33.75,
