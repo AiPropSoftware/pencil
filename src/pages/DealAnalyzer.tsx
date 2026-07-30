@@ -29,6 +29,7 @@ const LS_KEY = "pencil:dealAnalyzer:draft";
 
 export default function DealAnalyzer() {
   React.useEffect(() => { track("analyzer_view"); }, []);
+  const [advanced, setAdvanced] = React.useState(false);
   const { user } = useAuth();
   const [params] = useSearchParams();
   const [inputs, setInputs] = React.useState<DealInputs>(() => {
@@ -221,6 +222,26 @@ export default function DealAnalyzer() {
                     <NumericField label="Closing costs — sale" value={inputs.saleClosingPct} onChange={(v) => set("saleClosingPct", v)} suffix="%" percent hint="Seller-side title, escrow, transfer tax — paid when you SELL, separate from the purchase closing above." />
                   </div>
                 )}
+
+                {/* Advanced underwriting — opt-in; all default to 0 so the
+                    simple flow is untouched until the user wants the detail. */}
+                {!advanced ? (
+                  <button
+                    type="button"
+                    onClick={() => setAdvanced(true)}
+                    className="w-full rounded-md border border-dashed border-border px-4 py-3 text-sm text-muted-foreground hover:border-gold hover:text-foreground"
+                  >
+                    + Detailed underwriting — soft costs, contingency, taxes &amp; insurance during build
+                  </button>
+                ) : (
+                  <div className="grid sm:grid-cols-2 gap-4 rounded-md border border-gold/40 bg-secondary/30 p-4">
+                    <div className="sm:col-span-2 stat-label">Detailed underwriting</div>
+                    <NumericField label="Soft costs" value={inputs.softCostsPct} onChange={(v) => set("softCostsPct", v)} suffix="%" percent hint="Architecture, engineering, permits, impact fees — as % of hard construction." />
+                    <NumericField label="Soft costs (flat)" value={inputs.softCostsFlat} onChange={(v) => set("softCostsFlat", v)} prefix="$" hint="Fixed soft-cost amount on top of the percentage." />
+                    <NumericField label="Contingency" value={inputs.contingencyPct} onChange={(v) => set("contingencyPct", v)} suffix="%" percent hint="Reserve as % of hard construction — typical ground-up range is 5–10%." />
+                    <NumericField label="Taxes / ins / utilities" value={inputs.carryOtherMo} onChange={(v) => set("carryOtherMo", v)} prefix="$" hint="Monthly non-interest carry during the build (property tax, builder's risk, utilities)." />
+                  </div>
+                )}
               </TabsContent>
 
               {strategy === "rent" && (
@@ -315,11 +336,14 @@ function Results({ inputs, r, strategy }: { inputs: DealInputs; r: DealResults; 
         <CardHeader><CardTitle className="text-lg">Construction</CardTitle></CardHeader>
         <CardContent className="space-y-2">
           <Row label="Hard construction" value={fmtMoney(r.hardConstruction)} />
+          {r.softCosts > 0 && <Row label="Soft costs (A&E, permits, fees)" value={fmtMoney(r.softCosts)} />}
+          {r.contingency > 0 && <Row label={`Contingency (${(inputs.contingencyPct * 100).toFixed(1)}%)`} value={fmtMoney(r.contingency)} />}
           <Row label="Closing costs — purchase" value={fmtMoney(r.closingCosts)} />
           <Row label="Construction loan" value={fmtMoney(r.constructionLoan)} />
           <Row label="Lender fees" value={fmtMoney(r.lenderFees)} />
           <Row label="Monthly carry" value={fmtMoney(r.monthlyCarry)} />
           <Row label="Total carry" value={fmtMoney(r.totalCarry)} />
+          {r.otherCarry > 0 && <Row label="Taxes / ins / utilities during build" value={fmtMoney(r.otherCarry)} />}
         </CardContent>
       </Card>
 
