@@ -331,7 +331,7 @@ function statusFrom(text: string): DevStatus {
 }
 
 interface ArcgisGeometry { x?: number; y?: number; rings?: number[][][] }
-interface ArcgisResponse {
+export interface ArcgisResponse {
   error?: { code?: number; message?: string };
   fields?: { name: string }[];
   features?: { attributes?: Attrs; geometry?: ArcgisGeometry }[];
@@ -429,7 +429,9 @@ async function queryLayer(layerUrl: string, limit: number): Promise<{ data: Arcg
   return { data, url };
 }
 
-function normalize(src: ArcgisCitySource, data: ArcgisResponse): { items: Development[]; ppsfSamples: number[]; columns: string[] } {
+/** Exported for the historical backfill: identical filtering to the live app,
+ * WITHOUT the per-call 500-item cap (that cap lives in fetchArcgisCity). */
+export function normalize(src: ArcgisCitySource, data: ArcgisResponse): { items: Development[]; ppsfSamples: number[]; columns: string[] } {
   const features = data.features ?? [];
   const columns = data.fields?.map((f) => f.name) ?? Object.keys(features[0]?.attributes ?? {});
   const seen = new Set<string>();

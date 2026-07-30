@@ -19,10 +19,15 @@ export async function fetchStoredPermits(): Promise<Development[]> {
 
   const out: Development[] = [];
   for (let page = 0; page < MAX_PAGES; page++) {
+    // Ordered by permit date, NOT by last_seen_at: if a source breaks, its
+    // rows stop being re-seen — ordering by last-seen would evict exactly the
+    // rows the store exists to protect once the table outgrows the window.
+    // By date, only the oldest permits fall past the cap, which is the right
+    // priority for a map of current development.
     const { data, error } = await sb
       .from("permits")
       .select("*")
-      .order("last_seen_at", { ascending: false })
+      .order("approved_date", { ascending: false, nullsFirst: false })
       .range(page * PAGE, (page + 1) * PAGE - 1);
     if (error || !data) break;
     for (const r of data) {
