@@ -96,7 +96,7 @@ export interface CitySource {
   limit?: number;
   /** Portal type — plain Socrata SODA by default; ckan = CKAN datastore_search
    * endpoint (Boston, Pittsburgh/WPRDC…), carto = Carto SQL API (Philadelphia). */
-  kind?: "socrata" | "ckan" | "carto";
+  kind?: "socrata" | "ckan" | "carto" | "ods";
   /** carto only: SQL with a {limit} placeholder. */
   cartoQuery?: string;
   /** carto only: broader SQL retried when cartoQuery returns no rows. */
@@ -162,6 +162,18 @@ export const CITY_SOURCES: CitySource[] = [
   { city: "San Antonio", state: "TX", kind: "ckan", url: "https://data.sanantonio.gov/api/3/action/datastore_search?resource_id=c21106f9-3ef5-4f3a-8604-f992b4db7512", metroPpsf: 157, lat: 29.42, lng: -98.49, limit: 5000 },
   // Milwaukee removed: the only public permit resource is a CSV with no
   // coordinates (probe-verified 2026-07-30) — nothing honest to map.
+  // Memphis / Shelby County — Data Midsouth (OpenDataSoft, Innovate Memphis).
+  // The ONLY open geocoded permit feed for the metro (research 2026-07-30):
+  // county-wide (Memphis, Germantown, Collierville, Arlington, unincorp.),
+  // lat/lon on every row, contractor + valuation. Monthly batch, ~40-day lag
+  // — the honest ceiling for open Memphis data; the store keeps history.
+  {
+    city: "Memphis", state: "TN", kind: "ods",
+    url: "https://www.datamidsouth.org/api/explore/v2.1/catalog/datasets/shelby-county-building-and-demolition-permits/records",
+    where: 'record_type like "Residential New Construction"',
+    order: "date_status desc",
+    metroPpsf: 155, lat: 35.15, lng: -90.05, limit: 1000,
+  },
   // Philadelphia L&I permits (Carto SQL API) — new-construction filter first
   // (typeofwork values probe-verified), full feed as fallback.
   {
@@ -190,13 +202,39 @@ export interface CityResult {
 export async function fetchCityDevelopments(src: CitySource, limitOverride?: number): Promise<CityResult> {
   const limit = limitOverride ?? src.limit ?? 2500;
 
-  // CKAN + Carto portals: different envelopes, same row shape — rows feed the
-  // exact same normalizer below.
-  if (src.kind === "ckan" || src.kind === "carto") {
+  // CKAN + Carto + OpenDataSoft portals: different envelopes, same row shape —
+  // rows feed the exact same normalizer below.
+  if (src.kind === "ckan" || src.kind === "carto" || src.kind === "ods") {
     let url = src.url;
     try {
       let rows: Record<string, unknown>[] = [];
-      if (src.kind === "ckan") {
+      if (src.kind === "ods") {
+        // OpenDataSoft Explore v2.1: {total_count, results:[...]}. Hard cap of
+        // 100 rows per request — page by offset up to the source's limit.
+        // Server-side where first (new-construction filter); plain fallback.
+        const pageMax = Math.min(limit, 1000);
+        const base = src.where
+          ? `${src.url}?where=${encodeURIComponent(src.where)}&order_by=${encodeURIComponent(src.order ?? "date_status desc")}`
+          : `${src.url}?order_by=${encodeURIComponent(src.order ?? "date_status desc")}`;
+        for (let offset = 0; offset < pageMax; offset += 100) {
+          url = `${base}&limit=100&offset=${offset}`;
+          let res = await fetch(url, { headers: { Accept: "application/json" } });
+          if (!res.ok && offset === 0 && src.where) {
+            // where rejected (column rename?) → unfiltered; the normalizer
+            // still applies the new-residential gate client-side.
+            url = `${src.url}?limit=100&offset=0`;
+            res = await fetch(url, { headers: { Accept: "application/json" } });
+          }
+          if (!res.ok) {
+            if (offset === 0) return { city: src.city, items: [], total: 0, columns: [], url, buildPpsfSamples: 0, error: `HTTP ${res.status}` };
+            break;
+          }
+          const data = await res.json();
+          const batch = (data?.results ?? []) as Record<string, unknown>[];
+          rows.push(...batch);
+          if (batch.length < 100) break;
+        }
+      } else if (src.kind === "ckan") {
         // datastore_search: {result: {records: [...]}}. Newest-first via the
         // source's sort (default _id desc); fall back to the plain query.
         url = `${src.url}&limit=${limit}&sort=${src.ckanSort ?? "_id desc"}`;
@@ -299,7 +337,7 @@ function normalizeRows(src: CitySource, rows: Record<string, unknown>[], url: st
     const typeDesc = String(pick(r, ["permit_type_desc", "permit_type", "permittype", "permit_type_definition", "permittypedesc", "permit_type_description", "application_type"]) ?? "");
     const pclass = String(pick(r, ["permit_class", "permit_class_mapped", "permitclass", "permitclassmapped", "permit_sub_type", "occupancytype", "landuse", "lu", "topcat"]) ?? "");
     const work = String(pick(r, ["work_class", "work_type", "job_type", "worktype", "typeofwork", "WORK TYPE", "Permit Type"]) ?? "");
-    const desc = String(pick(r, ["description", "descr", "work_description", "work_desc", "activity", "purpose", "job_description", "proposed_use", "use_desc", "permitdescription", "approvedscopeofwork", "WORKDESCRIPTION", "PROJECT NAME", "project_name"]) ?? "");
+    const desc = String(pick(r, ["description", "descr", "work_description", "work_desc", "activity", "purpose", "job_description", "proposed_use", "use_desc", "permitdescription", "approvedscopeofwork", "WORKDESCRIPTION", "PROJECT NAME", "project_name", "record_type", "propclassdesc"]) ?? "");
     const blob = `${typeDesc} ${pclass} ${work} ${desc}`;
     const residentialFlag = String(pick(r, ["residential"]) ?? "").toLowerCase();
 
@@ -332,25 +370,28 @@ function normalizeRows(src: CitySource, rows: Record<string, unknown>[], url: st
     const sqftRaw = num(pick(r, ["total_new_add_sqft", "building_sqft", "square_feet", "proposed_sqft", "sq_feet", "totalsqft", "AREA (SF)"]));
     const hasRealSqft = Number.isFinite(sqftRaw) && sqftRaw > 200;
     const buildingSqft = Math.round(hasRealSqft ? sqftRaw : units * 1600);
-    const valuation = Math.round(num(pick(r, ["total_job_valuation", "total_valuation", "building_valuation", "declared_valuation", "estimated_cost", "revised_cost", "reported_cost", "estprojectcost", "const_cost", "initial_cost", "job_cost", "total_project_value", "PERMITVALUATION", "DECLARED VALUATION", "Construction Total Cost"])) || 0);
+    const valuation = Math.round(num(pick(r, ["total_job_valuation", "total_valuation", "building_valuation", "declared_valuation", "estimated_cost", "estimate_cost", "revised_cost", "reported_cost", "estprojectcost", "const_cost", "initial_cost", "job_cost", "total_project_value", "PERMITVALUATION", "DECLARED VALUATION", "Construction Total Cost"])) || 0);
 
     // Real build-cost sample: declared valuation ÷ real sqft, sanity-bounded.
     if (valuation > 0 && hasRealSqft) {
       const bp = valuation / sqftRaw;
       if (bp >= 60 && bp <= 1500) ppsfSamples.push(bp);
     }
-    const issued = String(pick(r, ["issued_date", "issue_date", "issueddate", "date_issued", "issuance_date", "applied_date", "applieddate", "filing_date", "permit_issue_date", "permitissuedate", "processed_date", "ISSUEDATE", "DATE ISSUED", "Date Issued"]) ?? "").slice(0, 10);
+    const issued = String(pick(r, ["issued_date", "issue_date", "issueddate", "date_issued", "issuance_date", "applied_date", "applieddate", "filing_date", "permit_issue_date", "permitissuedate", "processed_date", "date_status", "ISSUEDATE", "DATE ISSUED", "Date Issued"]) ?? "").slice(0, 10);
 
-    let address = String(pick(r, ["original_address1", "address", "street_address", "permit_location", "project_name", "originaladdress1", "permit_address", "ADDRESS", "Address", "gx_location"]) ?? "").trim();
+    let address = String(pick(r, ["original_address1", "address", "street_address", "permit_location", "project_name", "originaladdress1", "permit_address", "site_address", "ADDRESS", "Address", "gx_location"]) ?? "").trim();
     if (!address) {
       const houseNo = String(pick(r, ["house__", "house_no", "house_number", "street_number"]) ?? "").trim();
       const street = String(pick(r, ["street_name", "street"]) ?? "").trim();
       if (street) address = `${houseNo} ${street}`.trim();
     }
 
-    const contractor = String(pick(r, ["contractor_company_name", "contractorcompanyname", "contractor_name", "contractorname", "general_contractor", "applicant_organization", "contractor_full_name", "applicant_full_name", "contact_1_name", "CONTRACTOR", "PRIMARY CONTACT", "applicant"]) ?? "").trim();
+    const contractor = String(pick(r, ["contractor_company_name", "contractorcompanyname", "contractor_name", "contractorname", "general_contractor", "applicant_organization", "contractor_full_name", "applicant_full_name", "contact_1_name", "business_name_prof", "CONTRACTOR", "PRIMARY CONTACT", "applicant"]) ?? "")
+      .trim()
+      // Shelby County appends the license code: "D.R. HORTON, INC (B000)".
+      .replace(/\s*\(B[0-9A-Z]+\).*$/, "");
     const status = statusFrom(String(pick(r, ["status_current", "statuscurrent", "permit_status", "status", "current_status", "status_description", "application_status", "Status", "APPROVAL_STATUS"]) ?? ""));
-    const permitId = String(pick(r, ["permit_number", "permit_num", "permit_", "permitnumber", "permit_id", "job__", "FOLDERNUMBER", "PERMIT #", "Record ID", "row_id", ":id"]) ?? key);
+    const permitId = String(pick(r, ["permit_number", "permit_num", "permit_", "permitnumber", "permit_id", "record_id", "job__", "FOLDERNUMBER", "PERMIT #", "Record ID", "row_id", ":id"]) ?? key);
 
     const estValue = valuation > 0 ? Math.max(valuation, Math.round(buildingSqft * src.metroPpsf * 0.5)) : Math.round(buildingSqft * src.metroPpsf);
     const pricePerSqft = valuation > 0 && buildingSqft > 0

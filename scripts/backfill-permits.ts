@@ -68,7 +68,8 @@ const useStandard =
   meta.advancedQueryCapabilities?.supportsQueryWithResultType === true &&
   Number(meta.standardMaxRecordCount) > Number(meta.maxRecordCount ?? 2000);
 const pageSize = useStandard ? Math.min(Number(meta.standardMaxRecordCount), 32000) : Number(meta.maxRecordCount ?? 2000);
-const serverTotal = (await j(`${layer}/query?where=1%3D1&returnCountOnly=true&f=json`)).count as number;
+const countWhere = encodeURIComponent(src.where ?? "1=1");
+const serverTotal = (await j(`${layer}/query?where=${countWhere}&returnCountOnly=true&f=json`)).count as number;
 console.log(`${src.city} backfill: ${layer}`);
 console.log(`OID field ${oidField}, page size ${pageSize}${useStandard ? " (resultType=standard)" : ""}, server holds ${serverTotal} rows.`);
 
@@ -111,7 +112,7 @@ const now = new Date().toISOString();
 
 while (pages < MAX_PAGES) {
   const params = new URLSearchParams({
-    where: `${oidField} > ${lastOid}`,
+    where: src.where ? `(${src.where}) AND ${oidField} > ${lastOid}` : `${oidField} > ${lastOid}`,
     outFields: "*",
     outSR: "4326",
     f: "json",
