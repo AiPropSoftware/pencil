@@ -109,8 +109,9 @@ export const CITY_SOURCES: CitySource[] = [
   // ---- market anchors, not new-construction quotes.
   // New Orleans "Permits - BLDS" — BLDS-standard schema, native field match.
   { city: "New Orleans", state: "LA", url: "https://data.nola.gov/resource/72f9-bi28.json", metroPpsf: 210, lat: 29.95, lng: -90.07, limit: 5000 },
-  // Kansas City "Permits - Core Dataset" (BLDS via CompassKC, daily).
-  { city: "Kansas City", state: "MO", url: "https://data.kcmo.org/resource/ue52-x8g8.json", metroPpsf: 175, lat: 39.10, lng: -94.58, limit: 5000 },
+  // Kansas City removed: ue52-x8g8 went login-walled (canary 2026-07-30,
+  // HTTP 403) and the open catalog only carries per-decade historical
+  // listings — no live public feed to wire.
   // Orlando "Permit Applications" — contractor_name + geocoded_column.
   { city: "Orlando", state: "FL", url: "https://data.cityoforlando.net/resource/ryhf-m453.json", metroPpsf: 250, lat: 28.54, lng: -81.38, limit: 6000 },
   // Boston "Approved Building Permits" (Analyze Boston, CKAN datastore).
