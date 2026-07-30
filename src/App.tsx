@@ -2,6 +2,7 @@ import * as React from "react";
 import { Routes, Route } from "react-router-dom";
 import { CrashBoundary } from "@/components/CrashBoundary";
 import { Header } from "@/components/Header";
+import { TrialBanner } from "@/components/TrialBanner";
 import { Footer } from "@/components/Footer";
 import { Toaster } from "@/components/ui/toaster";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -28,6 +29,7 @@ export default function App() {
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
+      <TrialBanner />
       <main className="flex-1">
         <CrashBoundary>
         <React.Suspense fallback={<PageFallback />}>

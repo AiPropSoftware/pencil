@@ -1,3 +1,4 @@
+import * as React from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, Check, ShieldCheck, Radar, FileText, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -36,8 +37,8 @@ const TIERS: {
   },
   {
     name: "Pro",
-    price: "$149",
-    cadence: "per month",
+    price: "", // computed from the billing toggle
+    cadence: "",
     blurb: "For investors underwriting lots every week.",
     featured: true,
     features: [
@@ -133,9 +134,10 @@ const FAQ: { q: string; a: string }[] = [
 
 export default function Pricing() {
   const { user } = useAuth();
+  const [annual, setAnnual] = React.useState(true);
 
   const proCta = user ? (
-    <UpgradeButton size="lg" className="w-full">
+    <UpgradeButton size="lg" className="w-full" interval={annual ? "annual" : "monthly"}>
       Start 7-day free trial <ArrowRight className="h-4 w-4" />
     </UpgradeButton>
   ) : (
@@ -166,7 +168,7 @@ export default function Pricing() {
           {[
             ["$2,500+", "an architect feasibility study, per lot"],
             ["$197", "a single zoning report elsewhere"],
-            ["$149/mo", "Pencil Pro — unlimited lots"],
+            ["from $124/mo", "Pencil Pro — unlimited lots"],
           ].map(([v, l], i) => (
             <div key={l} className={`p-6 ${i === 2 ? "bg-gold-muted/40" : "bg-card"}`}>
               <div className={`font-display text-3xl ${i === 2 ? "text-foreground" : "text-muted-foreground"}`}>{v}</div>
@@ -178,6 +180,22 @@ export default function Pricing() {
 
       {/* Tiers */}
       <section className="container pb-20">
+        <div className="mb-10 flex items-center justify-center gap-1 text-sm">
+          <div className="inline-flex rounded-full border border-border bg-card p-1">
+            <button
+              onClick={() => setAnnual(true)}
+              className={`rounded-full px-4 py-1.5 transition-colors ${annual ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Annual <span className={annual ? "text-gold" : "text-gold/80"}>· 2 months free</span>
+            </button>
+            <button
+              onClick={() => setAnnual(false)}
+              className={`rounded-full px-4 py-1.5 transition-colors ${!annual ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Monthly
+            </button>
+          </div>
+        </div>
         <div className="grid gap-6 lg:grid-cols-3 max-w-5xl mx-auto items-stretch">
           {TIERS.map((t) => (
             <Card
@@ -192,9 +210,18 @@ export default function Pricing() {
               <CardContent className="p-7 flex flex-col h-full">
                 <div className="stat-label">{t.name}</div>
                 <div className="mt-3 flex items-baseline gap-2">
-                  <span className="font-display text-5xl tracking-tight">{t.price}</span>
-                  <span className="text-sm text-muted-foreground">{t.cadence}</span>
+                  <span className="font-display text-5xl tracking-tight">
+                    {t.name === "Pro" ? (annual ? "$124" : "$149") : t.price}
+                  </span>
+                  <span className="text-sm text-muted-foreground">
+                    {t.name === "Pro" ? "per month" : t.cadence}
+                  </span>
                 </div>
+                {t.name === "Pro" && (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {annual ? "billed annually — $1,490/yr (2 months free)" : "month-to-month, or $124/mo billed annually"}
+                  </div>
+                )}
                 <p className="mt-3 text-sm text-muted-foreground leading-relaxed">{t.blurb}</p>
                 <ul className="mt-6 space-y-2.5 flex-1">
                   {t.features.map((f) => (

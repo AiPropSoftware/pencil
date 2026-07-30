@@ -8,9 +8,13 @@ import { Sparkles } from "lucide-react";
 
 interface Props extends Omit<ButtonProps, "onClick"> {
   children?: React.ReactNode;
+  /** Billing interval — annual is what we optimize for. */
+  interval?: "monthly" | "annual";
+  /** Skip the 7-day trial (used when a trialing user converts). */
+  skipTrial?: boolean;
 }
 
-export function UpgradeButton({ children = "Upgrade to Pro", ...props }: Props) {
+export function UpgradeButton({ children = "Upgrade to Pro", interval = "annual", skipTrial = false, ...props }: Props) {
   const { user, configured } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = React.useState(false);
@@ -27,7 +31,7 @@ export function UpgradeButton({ children = "Upgrade to Pro", ...props }: Props) 
     setLoading(true);
     try {
       const sb = getSupabase()!;
-      const { data, error } = await sb.functions.invoke("stripe-checkout", { body: {} });
+      const { data, error } = await sb.functions.invoke("stripe-checkout", { body: { interval, skipTrial } });
       if (error) throw error;
       const url = (data as { url?: string })?.url;
       if (!url) throw new Error("No checkout URL returned");

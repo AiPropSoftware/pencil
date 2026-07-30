@@ -5,6 +5,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY");
 const STRIPE_PRICE_ID = Deno.env.get("STRIPE_PRICE_ID");          // Pro monthly price
+const STRIPE_PRICE_ID_ANNUAL = Deno.env.get("STRIPE_PRICE_ID_ANNUAL"); // Pro annual price (2 months free)
 const APP_URL = Deno.env.get("APP_URL") ?? "http://localhost:8080";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -35,6 +36,19 @@ Deno.serve(async (req) => {
     if (userErr || !userRes?.user) return json({ error: "unauthorized" }, { status: 401 });
     const user = userRes.user;
 
+    // Billing interval + trial control from the client. Annual is the plan
+    // we optimize for; skipTrial is used when a trialing user converts (a
+    // second trial would be nonsense). Annual falls back to monthly if the
+    // annual price isn't configured yet.
+    let interval = "monthly";
+    let skipTrial = false;
+    try {
+      const parsed = await req.json();
+      if (parsed?.interval === "annual") interval = "annual";
+      if (parsed?.skipTrial === true) skipTrial = true;
+    } catch { /* empty body is fine */ }
+    const priceId = interval === "annual" && STRIPE_PRICE_ID_ANNUAL ? STRIPE_PRICE_ID_ANNUAL : STRIPE_PRICE_ID;
+
     // Re-use customer if we've seen them before.
     const { data: sub } = await sb
       .from("subscriptions")
@@ -45,7 +59,7 @@ Deno.serve(async (req) => {
     const body = new URLSearchParams();
     body.set("mode", "subscription");
     body.set("payment_method_types[]", "card");
-    body.set("line_items[0][price]", STRIPE_PRICE_ID);
+    body.set("line_items[0][price]", priceId);
     body.set("line_items[0][quantity]", "1");
     body.set("success_url", `${APP_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}`);
     body.set("cancel_url", `${APP_URL}/?canceled=1`);
@@ -54,10 +68,13 @@ Deno.serve(async (req) => {
     body.set("allow_promotion_codes", "true");
     // 7-day free trial, no card up front: checkout skips payment collection,
     // and a trial that ends without a card cancels cleanly instead of
-    // dangling as an incomplete subscription.
-    body.set("subscription_data[trial_period_days]", "7");
-    body.set("payment_method_collection", "if_required");
-    body.set("subscription_data[trial_settings][end_behavior][missing_payment_method]", "cancel");
+    // dangling as an incomplete subscription. Conversions (skipTrial) go
+    // straight to payment.
+    if (!skipTrial) {
+      body.set("subscription_data[trial_period_days]", "7");
+      body.set("payment_method_collection", "if_required");
+      body.set("subscription_data[trial_settings][end_behavior][missing_payment_method]", "cancel");
+    }
     if (sub?.stripe_customer_id) {
       body.set("customer", sub.stripe_customer_id);
     } else {
