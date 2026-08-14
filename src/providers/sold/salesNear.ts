@@ -128,9 +128,9 @@ export const SALE_SOURCES: SaleSource[] = [
     dateKey: "OwnDate",
     sqftKey: "FinishArea",
     addressKeys: ["PropAddr"],
-    where: "SalePrice > 40000",
+    // Canary 2026-08-14: this MapServer 400s on ANY where clause against
+    // SalePrice — query bare, filter client-side (finish() does it anyway).
     queryStyle: "envelope",
-    orderBy: "OwnDate DESC",
   },
   {
     // Verified 2026-08-14: PostGIS radius query returns live rows
@@ -346,6 +346,12 @@ async function fetchArcgisNear(src: ArcgisSaleSource, lat: number, lng: number):
   }
   if (!data.features && params.get("where") !== "1=1") {
     params.set("where", "1=1");
+    data = await run();
+  }
+  if (!data.features && src.queryStyle === "distance") {
+    // FL's hosted layer intermittently rejects the JSON point ("SRID is not
+    // valid") — the bare "lng,lat" form + inSR is the last resort.
+    params.set("geometry", `${lng},${lat}`);
     data = await run();
   }
   if (!data.features) throw new Error(`${src.name}: ${data.error?.message ?? "no features"}`);
