@@ -1,11 +1,11 @@
 /**
- * Sales probe — hunts for RECORDED-SALE data (real deed-transfer prices) that
- * can be queried NEAR A POINT, to power "drop an address → what's selling
- * nearby". Runs from a GitHub runner (open egress); not in the app bundle.
- *
- * A source qualifies only if it has, per record: price + date + address (or
- * parcel geometry) + coordinates, AND supports a spatial near-point query
- * (Socrata within_circle, or an ArcGIS envelope/point-distance query).
+ * Sales probe, round 2 — round 1 verified NYC rolling sales (lat/lng + bbox
+ * $where works) and found two near-misses to close:
+ *   1. Florida FDOR statewide parcel centroids: SALE_PRC1/SALE_YR1 exist but
+ *      the envelope query 400'd — try query variants + print the full schema.
+ *   2. maps.nashville.gov has a Cadastral/ folder round 1 didn't descend into.
+ * Plus: Philadelphia's Carto OPA table (sale_price/sale_date + PostGIS radius).
+ * Runs from a GitHub runner (open egress); not in the app bundle.
  */
 
 const realFetch = globalThis.fetch;
@@ -22,171 +22,116 @@ async function get(url: string): Promise<{ status: number; json: unknown | null;
 }
 
 const SALEISH = /sale|sold|price|deed|transfer|consider|amount/i;
-const DATEISH = /date|_dt\b|_dat\b|year|_yr\b/i;
 
-// ── Socrata: direct candidates ──────────────────────────────────────────────
-interface SocrataCandidate { label: string; url: string; lat: number; lng: number }
-const SOCRATA_DIRECT: SocrataCandidate[] = [
-  { label: "NYC rolling sales (w2pb-icbu)", url: "https://data.cityofnewyork.us/resource/w2pb-icbu.json", lat: 40.6782, lng: -73.9442 },
-  { label: "Cook County parcel sales (wvhk-k5uv)", url: "https://datacatalog.cookcountyil.gov/resource/wvhk-k5uv.json", lat: 41.8781, lng: -87.6298 },
-];
+// ── 1. Florida FDOR centroids: why did the envelope 400? ────────────────────
+const FL = "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0";
+const MIA = { lat: 25.7907, lng: -80.2036 }; // residential Miami (Little Havana-ish)
 
-function findPointCol(row: Record<string, unknown>): string | null {
-  for (const [k, v] of Object.entries(row)) {
-    if (v && typeof v === "object" && "latitude" in (v as object)) return k;
-    if (v && typeof v === "object" && (v as { type?: string }).type === "Point") return k;
+console.log("═══ FLORIDA FDOR CENTROIDS ═══");
+{
+  const meta = await get(`${FL}?f=json`);
+  const m = meta.json as { fields?: { name: string }[]; maxRecordCount?: number; capabilities?: string; supportedQueryFormats?: string } | null;
+  console.log(JSON.stringify({
+    capabilities: m?.capabilities,
+    maxRecordCount: m?.maxRecordCount,
+    formats: m?.supportedQueryFormats,
+    allFields: (m?.fields ?? []).map((f) => f.name).join(","),
+  }, null, 1));
+
+  const d = 0.006;
+  const variants: { name: string; qs: string }[] = [
+    {
+      name: "A: envelope JSON + spatialReference",
+      qs: `where=1%3D1&outFields=*&resultRecordCount=3&returnGeometry=true&outSR=4326&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&geometry=${encodeURIComponent(JSON.stringify({ xmin: MIA.lng - d, ymin: MIA.lat - d, xmax: MIA.lng + d, ymax: MIA.lat + d, spatialReference: { wkid: 4326 } }))}`,
+    },
+    {
+      name: "B: simple comma envelope",
+      qs: `where=1%3D1&outFields=*&resultRecordCount=3&returnGeometry=true&outSR=4326&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&geometry=${MIA.lng - d},${MIA.lat - d},${MIA.lng + d},${MIA.lat + d}`,
+    },
+    {
+      name: "C: point + distance 1200m",
+      qs: `where=1%3D1&outFields=*&resultRecordCount=3&returnGeometry=true&outSR=4326&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&distance=1200&units=esriSRUnit_Meter&geometry=${encodeURIComponent(JSON.stringify({ x: MIA.lng, y: MIA.lat, spatialReference: { wkid: 4326 } }))}`,
+    },
+    {
+      name: "D: envelope, no resultRecordCount, outFields=OBJECTID",
+      qs: `where=1%3D1&outFields=OBJECTID&returnGeometry=false&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&geometry=${MIA.lng - d},${MIA.lat - d},${MIA.lng + d},${MIA.lat + d}`,
+    },
+    {
+      name: "E: attribute-only sanity (no geometry)",
+      qs: `where=${encodeURIComponent("SALE_YR1 > 2023 AND SALE_PRC1 > 100000")}&outFields=SALE_PRC1,SALE_YR1,SALE_MO1&resultRecordCount=2&returnGeometry=false`,
+    },
+  ];
+  for (const v of variants) {
+    const r = await get(`${FL}/query?f=json&${v.qs}`);
+    const j = r.json as { features?: { attributes?: Record<string, unknown> }[]; error?: unknown } | null;
+    console.log(JSON.stringify({
+      variant: v.name,
+      result: j?.features ? `${j.features.length} rows` : `FAIL ${JSON.stringify(j?.error ?? r.text).slice(0, 140)}`,
+      sample: j?.features?.[0] ? JSON.stringify(j.features[0].attributes).slice(0, 420) : undefined,
+    }, null, 1));
   }
-  return null;
 }
 
-async function probeSocrataDirect(c: SocrataCandidate) {
-  const out: Record<string, unknown> = { label: c.label };
-  const sample = await get(`${c.url}?$limit=2&$order=:id DESC`);
-  if (!Array.isArray(sample.json)) { out.error = `HTTP ${sample.status} ${sample.text}`; return out; }
-  const rows = sample.json as Record<string, unknown>[];
-  if (!rows.length) { out.error = "no rows"; return out; }
-  out.columns = Object.keys(rows[0]).join(",");
-  out.sample = JSON.stringify(rows[0]).slice(0, 500);
-  // Try latitude/longitude pair columns, then a point-typed column.
-  const keys = Object.keys(rows[0]);
-  const latKey = keys.find((k) => /^lat(itude)?$/i.test(k));
-  const lngKey = keys.find((k) => /^(lng|lon|long|longitude)$/i.test(k));
-  const ptCol = findPointCol(rows[0]);
-  out.coords = latKey && lngKey ? `${latKey}/${lngKey}` : ptCol ? `point:${ptCol}` : "NONE";
-  const circleCol = ptCol ?? (latKey && lngKey ? null : null);
-  if (circleCol) {
-    const q = `${c.url}?$where=${encodeURIComponent(`within_circle(${circleCol}, ${c.lat}, ${c.lng}, 1500)`)}&$limit=3`;
-    const near = await get(q);
-    out.within_circle = Array.isArray(near.json) ? `${(near.json as unknown[]).length} rows` : `HTTP ${near.status} ${near.text}`;
-  } else if (latKey && lngKey) {
-    // Numeric lat/lng columns still allow a bounding-box $where.
-    const w = `${latKey} > ${c.lat - 0.01} AND ${latKey} < ${c.lat + 0.01} AND ${lngKey} > ${c.lng - 0.013} AND ${lngKey} < ${c.lng + 0.013}`;
-    const near = await get(`${c.url}?$where=${encodeURIComponent(w)}&$limit=3`);
-    out.bbox_where = Array.isArray(near.json) ? `${(near.json as unknown[]).length} rows` : `HTTP ${near.status} ${near.text}`;
-  }
-  return out;
-}
-
-// ── Socrata: catalog discovery for sales datasets in covered metros ─────────
-const SOCRATA_DOMAINS = [
-  "data.nashville.gov",
-  "data.cityofnewyork.us",
-  "datacatalog.cookcountyil.gov",
-  "data.kingcounty.gov",
-  "dallasopendata.com",
-  "data.memphistn.gov",
-  "data.austintexas.gov",
-];
-
-async function probeSocrataCatalog(domain: string) {
-  const hits: string[] = [];
-  for (const q of ["property sales", "real estate transfers"]) {
-    const res = await get(`https://api.us.socrata.com/api/catalog/v1?domains=${domain}&only=datasets&limit=8&q=${encodeURIComponent(q)}`);
-    const cat = res.json as { results?: { resource?: { id?: string; name?: string }; metadata?: { domain?: string } }[] } | null;
-    for (const r of cat?.results ?? []) {
-      const name = r.resource?.name ?? "";
-      if (!/sale|transfer|deed|assess/i.test(name)) continue;
-      const h = `${r.resource?.id} "${name.slice(0, 60)}"`;
-      if (!hits.includes(h)) hits.push(h);
+// ── 2. Nashville Cadastral folder descent ───────────────────────────────────
+console.log("\n═══ NASHVILLE CADASTRAL ═══");
+{
+  const NSH = { lat: 36.1447, lng: -86.8021 }; // residential Sylvan Park-ish
+  const folder = await get("https://maps.nashville.gov/arcgis/rest/services/Cadastral?f=json");
+  const f = folder.json as { services?: { name: string; type: string }[] } | null;
+  console.log(JSON.stringify({ services: (f?.services ?? []).map((s) => `${s.name}(${s.type})`) }));
+  for (const s of (f?.services ?? []).slice(0, 5)) {
+    const svcUrl = `https://maps.nashville.gov/arcgis/rest/services/${s.name}/${s.type}`;
+    const svc = await get(`${svcUrl}?f=json`);
+    const sj = svc.json as { layers?: { id: number; name: string }[] } | null;
+    console.log(JSON.stringify({ service: s.name, layers: (sj?.layers ?? []).map((l) => `${l.id}:${l.name}`).slice(0, 20) }));
+    for (const l of (sj?.layers ?? []).slice(0, 6)) {
+      const meta = await get(`${svcUrl}/${l.id}?f=json`);
+      const m = meta.json as { fields?: { name: string }[] } | null;
+      const saleFields = (m?.fields ?? []).filter((x) => SALEISH.test(x.name)).map((x) => x.name);
+      if (!saleFields.length) { console.log(JSON.stringify({ layer: `${s.name}/${l.id} ${l.name}`, saleFields: "NONE" })); continue; }
+      const d = 0.005;
+      const q = `${svcUrl}/${l.id}/query?f=json&where=1%3D1&outFields=*&resultRecordCount=2&returnGeometry=true&outSR=4326` +
+        `&geometry=${NSH.lng - d},${NSH.lat - d},${NSH.lng + d},${NSH.lat + d}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects`;
+      const near = await get(q);
+      const nr = near.json as { features?: { attributes?: Record<string, unknown> }[]; error?: unknown } | null;
+      console.log(JSON.stringify({
+        layer: `${s.name}/${l.id} ${l.name}`,
+        saleFields: saleFields.join(","),
+        allFields: (m?.fields ?? []).map((x) => x.name).join(",").slice(0, 600),
+        envelope: nr?.features ? `${nr.features.length} rows` : `FAIL ${JSON.stringify(nr?.error ?? near.text).slice(0, 140)}`,
+        sample: nr?.features?.[0] ? JSON.stringify(nr.features[0].attributes).slice(0, 500) : undefined,
+      }, null, 1));
     }
   }
-  return { domain, hits: hits.slice(0, 8) };
 }
 
-// ── ArcGIS: candidate layers (direct + AGOL search) ─────────────────────────
-interface ArcCandidate { label: string; layer: string; lat: number; lng: number }
-
-async function agolSearch(q: string, max = 5): Promise<{ title: string; url: string }[]> {
-  const res = await get(`https://www.arcgis.com/sharing/rest/search?f=json&num=${max}&q=${encodeURIComponent(q + ' type:"Feature Service"')}`);
-  const data = res.json as { results?: { url?: string; title?: string }[] } | null;
-  return (data?.results ?? [])
-    .filter((r) => r.url && /FeatureServer/i.test(r.url))
-    .map((r) => ({ title: r.title ?? "", url: r.url!.replace(/\/$/, "") }));
+// ── 3. Philadelphia Carto OPA (sale_price + PostGIS radius) ─────────────────
+console.log("\n═══ PHILADELPHIA CARTO OPA ═══");
+{
+  const sql = encodeURIComponent(
+    "SELECT location, sale_price, sale_date, total_livable_area, ST_Y(the_geom) AS lat, ST_X(the_geom) AS lng " +
+    "FROM opa_properties_public " +
+    "WHERE the_geom IS NOT NULL AND sale_price > 40000 " +
+    "AND ST_DWithin(the_geom::geography, ST_SetSRID(ST_MakePoint(-75.1652, 39.9526), 4326)::geography, 1200) " +
+    "ORDER BY sale_date DESC LIMIT 3",
+  );
+  const r = await get(`https://phl.carto.com/api/v2/sql?q=${sql}`);
+  const j = r.json as { rows?: Record<string, unknown>[]; error?: unknown } | null;
+  console.log(JSON.stringify({
+    result: j?.rows ? `${j.rows.length} rows` : `FAIL ${JSON.stringify(j?.error ?? r.text).slice(0, 200)}`,
+    sample: j?.rows?.[0] ? JSON.stringify(j.rows[0]) : undefined,
+  }, null, 1));
 }
 
-async function probeArcLayer(c: ArcCandidate) {
-  const out: Record<string, unknown> = { label: c.label, layer: c.layer };
-  const meta = await get(`${c.layer}?f=json`);
-  const m = meta.json as { fields?: { name: string; type: string }[]; name?: string; error?: unknown } | null;
-  if (!m?.fields) { out.error = `no fields (HTTP ${meta.status}) ${JSON.stringify(m?.error ?? meta.text).slice(0, 120)}`; return out; }
-  out.name = m.name;
-  const saleFields = m.fields.filter((f) => SALEISH.test(f.name)).map((f) => f.name);
-  const dateFields = m.fields.filter((f) => DATEISH.test(f.name)).map((f) => f.name);
-  out.saleFields = saleFields.join(",").slice(0, 200) || "NONE";
-  out.dateFields = dateFields.join(",").slice(0, 160) || "NONE";
-  if (!saleFields.length) return out;
-  // Envelope query near the metro point — the exact query the app would run.
-  const d = 0.006;
-  const env = JSON.stringify({ xmin: c.lng - d, ymin: c.lat - d, xmax: c.lng + d, ymax: c.lat + d });
-  const q = `${c.layer}/query?f=json&where=1%3D1&outFields=*&resultRecordCount=3&returnGeometry=true&outSR=4326` +
-    `&geometry=${encodeURIComponent(env)}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects`;
-  const near = await get(q);
-  const nr = near.json as { features?: { attributes?: Record<string, unknown> }[]; error?: unknown } | null;
-  if (!nr?.features) { out.envelope = `FAIL ${JSON.stringify(nr?.error ?? near.text).slice(0, 140)}`; return out; }
-  out.envelope = `${nr.features.length} rows`;
-  const a = nr.features[0]?.attributes ?? {};
-  out.saleSample = JSON.stringify(
-    Object.fromEntries(Object.entries(a).filter(([k]) => SALEISH.test(k) || DATEISH.test(k) || /addr|street|situs|owner/i.test(k))),
-  ).slice(0, 400);
-  return out;
-}
-
-// ── Run ─────────────────────────────────────────────────────────────────────
-console.log("═══ SOCRATA DIRECT ═══");
-for (const c of SOCRATA_DIRECT) console.log(JSON.stringify(await probeSocrataDirect(c), null, 1));
-
-console.log("\n═══ SOCRATA CATALOG (sales datasets per domain) ═══");
-for (const d of SOCRATA_DOMAINS) console.log(JSON.stringify(await probeSocrataCatalog(d)));
-
-console.log("\n═══ ARCGIS: metro parcel/sales layer hunt ═══");
-const HUNTS: { q: string; lat: number; lng: number; tag: string }[] = [
-  { q: "Davidson County Nashville parcels", lat: 36.1627, lng: -86.7816, tag: "Nashville" },
-  { q: "Nashville property sales", lat: 36.1627, lng: -86.7816, tag: "Nashville" },
-  { q: "Knox County TN parcels", lat: 35.9606, lng: -83.9207, tag: "Knoxville" },
-  { q: "Hamilton County TN parcels", lat: 35.0456, lng: -85.3097, tag: "Chattanooga" },
-  { q: "Shelby County TN parcels assessor", lat: 35.1495, lng: -90.049, tag: "Memphis" },
-  { q: "Florida statewide parcels", lat: 25.7617, lng: -80.1918, tag: "Miami/FL" },
-  { q: "Miami-Dade parcels sales", lat: 25.7617, lng: -80.1918, tag: "Miami" },
-  { q: "Travis County parcels", lat: 30.2672, lng: -97.7431, tag: "Austin" },
-  { q: "Mecklenburg County parcels sales", lat: 35.2271, lng: -80.8431, tag: "Charlotte" },
-  { q: "Maricopa County parcels", lat: 33.4484, lng: -112.074, tag: "Phoenix" },
-];
-const seen = new Set<string>();
-for (const h of HUNTS) {
-  const results = await agolSearch(h.q, 4);
-  console.log(`\n-- AGOL "${h.q}" → ${results.length} services`);
-  for (const r of results.slice(0, 3)) {
-    const layer = `${r.url}/0`;
-    if (seen.has(layer)) continue;
-    seen.add(layer);
-    console.log(JSON.stringify(await probeArcLayer({ label: `${h.tag}: ${r.title.slice(0, 50)}`, layer, lat: h.lat, lng: h.lng }), null, 1));
-  }
-}
-
-// Known government servers worth a direct look (roots listed, parcel-ish
-// services probed). These are servers we already trust from the permit work.
-console.log("\n═══ ARCGIS: direct government servers ═══");
-const ROOTS: { root: string; lat: number; lng: number; tag: string }[] = [
-  { root: "https://maps.nashville.gov/arcgis/rest/services", lat: 36.1627, lng: -86.7816, tag: "Nashville" },
-  { root: "https://gis.shelbycountytn.gov/arcgis/rest/services", lat: 35.1495, lng: -90.049, tag: "Memphis" },
-  { root: "https://www.kgis.org/arcgis/rest/services", lat: 35.9606, lng: -83.9207, tag: "Knoxville" },
-];
-for (const r of ROOTS) {
-  const idx = await get(`${r.root}?f=json`);
-  const data = idx.json as { services?: { name: string; type: string }[]; folders?: string[] } | null;
-  if (!data?.services && !data?.folders) { console.log(JSON.stringify({ root: r.root, error: `HTTP ${idx.status} ${idx.text}` })); continue; }
-  const names = [
-    ...(data.services ?? []).map((s) => `${s.name}(${s.type})`),
-    ...(data.folders ?? []).map((f) => `${f}/`),
-  ];
-  const interesting = names.filter((n) => /parcel|cadast|propert|assess|sale|tax/i.test(n));
-  console.log(JSON.stringify({ root: r.root, interesting: interesting.slice(0, 12), all: interesting.length ? undefined : names.slice(0, 20) }));
-  // Probe layer 0 of up to 2 interesting MapServer/FeatureServer services.
-  for (const n of interesting.slice(0, 2)) {
-    const mMatch = n.match(/^(.+)\((MapServer|FeatureServer)\)$/);
-    if (!mMatch) continue;
-    const layer = `${r.root}/${mMatch[1]}/${mMatch[2]}/0`;
-    console.log(JSON.stringify(await probeArcLayer({ label: `${r.tag} direct`, layer, lat: r.lat, lng: r.lng }), null, 1));
-  }
+// ── 4. NYC: confirm ordered bbox query (the exact app query) ────────────────
+console.log("\n═══ NYC ORDERED BBOX ═══");
+{
+  const B = { lat: 40.6782, lng: -73.9442 };
+  const w = `latitude > ${B.lat - 0.011} AND latitude < ${B.lat + 0.011} AND longitude > ${B.lng - 0.014} AND longitude < ${B.lng + 0.014} AND sale_price > 40000`;
+  const url = `https://data.cityofnewyork.us/resource/w2pb-icbu.json?$where=${encodeURIComponent(w)}&$order=sale_date DESC&$limit=4`;
+  const r = await get(url);
+  console.log(Array.isArray(r.json)
+    ? JSON.stringify((r.json as Record<string, unknown>[]).map((x) => ({ a: x.address, p: x.sale_price, dte: x.sale_date, sf: x.gross_square_feet, lat: x.latitude, lng: x.longitude })), null, 1)
+    : `FAIL HTTP ${r.status} ${r.text}`);
 }
 console.log("\nPROBE DONE");
