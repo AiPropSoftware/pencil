@@ -680,6 +680,51 @@ const CHECKS = [
   },
 ];
 
+// ---- Nearby sales — round-3 expansion sources -----------------------------
+// Same envelope shape the app sends, at points verified to return rows on
+// 2026-08-14; asserts the price/address fields haven't drifted.
+const SALES_LAYERS = [
+  ["MassGIS statewide parcels", "https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Property_Tax_Parcels/FeatureServer/0", 42.3601, -71.0589, ["LS_PRICE", "SITE_ADDR"]],
+  ["Franklin Co sales points (Columbus)", "https://services1.arcgis.com/7r2Wl09a1Apy459r/arcgis/rest/services/FCAO_Sales_Dashboard_Sales_Points/FeatureServer/0", 39.9612, -82.9988, ["SalePrice", "SITEADDRESS"]],
+  ["Cuyahoga sales layer (Cleveland)", "https://services7.arcgis.com/GXM8JipKyc0m6HBi/arcgis/rest/services/CuyahogaSalesData/FeatureServer/0", 41.4993, -81.6944, ["SALE_AMOUNT", "PCL_ADDR_FULL"]],
+  ["King Co 3-yr sales (Seattle)", "https://services.arcgis.com/Ej0PsM5Aw677QF1W/arcgis/rest/services/PARCEL_SALES3YR_AREA_287/FeatureServer/0", 47.6062, -122.3321, ["SalePrice", "address"]],
+  ["Wake Co parcels (Raleigh)", "https://maps.wake.gov/arcgis/rest/services/Property/Parcels/MapServer/0", 35.7796, -78.6382, ["TOTSALPRICE", "SITE_ADDRESS"]],
+  ["Detroit authoritative parcels", "https://services2.arcgis.com/PpbvckyUgaYqseNQ/arcgis/rest/services/Detroit_MP_Parcel_Authoritative/FeatureServer/0", 42.3314, -83.0458, ["sale_price", "address"]],
+  ["NJ MOD-IV composite (Newark pt)", "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Parcels_Composite_NJ_WM/FeatureServer/0", 40.7357, -74.1724, ["SALE_PRICE", "PROP_LOC"]],
+];
+for (const [nm, layer, la, ln, fields] of SALES_LAYERS) {
+  CHECKS.push({
+    name: `Nearby sales — ${nm}`,
+    async run() {
+      const d = 0.006;
+      const u = `${layer}/query?f=json&where=1%3D1&outFields=*&resultRecordCount=2&returnGeometry=true&outSR=4326` +
+        `&geometry=${ln - d},${la - d},${ln + d},${la + d}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects`;
+      const r = await fetchJson(u);
+      if (!r.features?.length) throw new Error(`no features: ${JSON.stringify(r.error || r).slice(0, 140)}`);
+      const a = r.features[0].attributes || {};
+      for (const f of fields) if (!(f in a)) throw new Error(`field ${f} drifted: ${Object.keys(a).slice(0, 14).join(",")}`);
+      return `${r.features.length} rows, fields intact`;
+    },
+  });
+}
+CHECKS.push({
+  name: "Nearby sales — Cook County PIN join (Chicago)",
+  async run() {
+    const p = await fetchJson(
+      "https://datacatalog.cookcountyil.gov/resource/tx2p-k2g9.json?$where=" +
+        encodeURIComponent("lat > 41.87 AND lat < 41.90 AND lon > -87.66 AND lon < -87.62") +
+        "&$select=pin,lat,lon,prop_address_full&$limit=3",
+    );
+    if (!Array.isArray(p) || !p.length || !p[0].pin) throw new Error(`parcel leg broken: ${JSON.stringify(p).slice(0, 120)}`);
+    const s = await fetchJson(
+      "https://datacatalog.cookcountyil.gov/resource/wvhk-k5uv.json?$where=" +
+        encodeURIComponent(`pin in('${p[0].pin}') AND sale_price > 40000`) + "&$limit=1",
+    );
+    if (!Array.isArray(s)) throw new Error("sales leg broken");
+    return `parcel leg ok (${p.length} pins); sales leg ok`;
+  },
+});
+
 // ---- Runner ----------------------------------------------------------------
 const pool = 4;
 let i = 0;

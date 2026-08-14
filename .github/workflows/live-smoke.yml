@@ -18,7 +18,8 @@ jobs:
       - name: Install playwright (uses the runner's Chrome)
         run: npm i --no-save playwright@1.49.1
       - name: Smoke the live site
-        run: node scripts/live-smoke.mjs | tee live-smoke-report.txt
+        # pipefail: without it, tee masks the script's pass/fail exit code.
+        run: set -o pipefail; node scripts/live-smoke.mjs | tee live-smoke-report.txt
       - name: Publish summary
         if: always()
         run: |
