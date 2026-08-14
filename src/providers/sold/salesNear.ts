@@ -94,7 +94,31 @@ interface CartoSaleSource {
   addressKeys: string[];
 }
 
-export type SaleSource = SocrataSaleSource | ArcgisSaleSource | CartoSaleSource;
+/**
+ * Two-request join for counties that publish sales and parcel locations as
+ * separate Socrata datasets (Cook County): bbox the parcel table for
+ * PIN + coords + address, then pull recent sales for those PINs.
+ */
+interface SocrataJoinSaleSource {
+  kind: "socrataJoin";
+  name: string;
+  homepage: string;
+  parcelUrl: string;
+  pinKey: string;
+  latKey: string;
+  lonKey: string;
+  addressKey: string;
+  salesUrl: string;
+  salesPinKey: string;
+  priceKey: string;
+  dateKey: string;
+  /** Join rows carry no building size; address is synthesized into __addr. */
+  sqftKey: null;
+  addressKeys: string[];
+  bbox: BBox;
+}
+
+export type SaleSource = SocrataSaleSource | ArcgisSaleSource | CartoSaleSource | SocrataJoinSaleSource;
 
 /** Filled ONLY with probe-verified sources — see scripts/sales-probe.ts. */
 export const SALE_SOURCES: SaleSource[] = [
@@ -173,6 +197,117 @@ export const SALE_SOURCES: SaleSource[] = [
     queryStyle: "distance",
     orderBy: "SALE_YR1 DESC",
   },
+  {
+    // Verified 2026-08-14 (round 3): MassGIS L3 statewide parcels —
+    // LS_PRICE/LS_DATE(yyyymmdd)/SITE_ADDR/RES_AREA, envelope works.
+    kind: "arcgis",
+    name: "MassGIS statewide tax parcels",
+    homepage: "https://www.mass.gov/info-details/massgis-data-property-tax-parcels",
+    layer: "https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Property_Tax_Parcels/FeatureServer/0",
+    bbox: { latMin: 41.2, latMax: 42.9, lngMin: -73.6, lngMax: -69.9 },
+    priceKey: "LS_PRICE",
+    dateKey: "LS_DATE",
+    sqftKey: "RES_AREA",
+    addressKeys: ["SITE_ADDR"],
+  },
+  {
+    // Verified 2026-08-14 (round 3): Franklin County Auditor's own sales
+    // points — SALEDATE(epoch)/SalePrice/SITEADDRESS/RESFLRAREA.
+    kind: "arcgis",
+    name: "Franklin County Auditor sales (Columbus)",
+    homepage: "https://www.franklincountyauditor.com",
+    layer: "https://services1.arcgis.com/7r2Wl09a1Apy459r/arcgis/rest/services/FCAO_Sales_Dashboard_Sales_Points/FeatureServer/0",
+    bbox: { latMin: 39.81, latMax: 40.16, lngMin: -83.26, lngMax: -82.77 },
+    priceKey: "SalePrice",
+    dateKey: "SALEDATE",
+    sqftKey: "RESFLRAREA",
+    addressKeys: ["SITEADDRESS"],
+  },
+  {
+    // Verified 2026-08-14 (round 3): Cuyahoga County sales 2021-present —
+    // SALE_AMOUNT/SALE_DATE(epoch)/PCL_ADDR_FULL/TOTAL_RES_LIV_AREA.
+    kind: "arcgis",
+    name: "Cuyahoga County parcel sales (Cleveland)",
+    homepage: "https://cuyahogacounty.gov/fiscal-officer",
+    layer: "https://services7.arcgis.com/GXM8JipKyc0m6HBi/arcgis/rest/services/CuyahogaSalesData/FeatureServer/0",
+    bbox: { latMin: 41.28, latMax: 41.63, lngMin: -81.97, lngMax: -81.39 },
+    priceKey: "SALE_AMOUNT",
+    dateKey: "SALE_DATE",
+    sqftKey: "TOTAL_RES_LIV_AREA",
+    addressKeys: ["PCL_ADDR_FULL"],
+  },
+  {
+    // Verified 2026-08-14 (round 3): King County GIS "Parcel Sales Last 3
+    // Years" — SalePrice/SaleDate(epoch)/address. No building-size field.
+    kind: "arcgis",
+    name: "King County parcel sales (Seattle)",
+    homepage: "https://kingcounty.gov/en/dept/assessor",
+    layer: "https://services.arcgis.com/Ej0PsM5Aw677QF1W/arcgis/rest/services/PARCEL_SALES3YR_AREA_287/FeatureServer/0",
+    bbox: { latMin: 47.08, latMax: 47.79, lngMin: -122.55, lngMax: -121.0 },
+    priceKey: "SalePrice",
+    dateKey: "SaleDate",
+    sqftKey: null,
+    addressKeys: ["address"],
+  },
+  {
+    // Verified 2026-08-14 (round 3): Wake County parcels — TOTSALPRICE/
+    // SALE_DATE(epoch)/SITE_ADDRESS/HEATEDAREA, envelope works.
+    kind: "arcgis",
+    name: "Wake County parcels (Raleigh)",
+    homepage: "https://www.wake.gov/departments-government/tax-administration",
+    layer: "https://maps.wake.gov/arcgis/rest/services/Property/Parcels/MapServer/0",
+    bbox: { latMin: 35.52, latMax: 36.08, lngMin: -78.99, lngMax: -78.25 },
+    priceKey: "TOTSALPRICE",
+    dateKey: "SALE_DATE",
+    sqftKey: "HEATEDAREA",
+    addressKeys: ["SITE_ADDRESS"],
+  },
+  {
+    // Verified 2026-08-14 (round 3): Detroit's authoritative parcel layer —
+    // sale_price/sale_date/address/total_floor_area.
+    kind: "arcgis",
+    name: "City of Detroit parcels",
+    homepage: "https://data.detroitmi.gov",
+    layer: "https://services2.arcgis.com/PpbvckyUgaYqseNQ/arcgis/rest/services/Detroit_MP_Parcel_Authoritative/FeatureServer/0",
+    bbox: { latMin: 42.25, latMax: 42.46, lngMin: -83.29, lngMax: -82.91 },
+    priceKey: "sale_price",
+    dateKey: "sale_date",
+    sqftKey: "total_floor_area",
+    addressKeys: ["address"],
+  },
+  {
+    // Verified 2026-08-14 (round 3): NJ MOD-IV statewide composite —
+    // SALE_PRICE/DEED_DATE(epoch)/PROP_LOC. Listed AFTER NYC/Philly so
+    // border points hit the city feeds first.
+    kind: "arcgis",
+    name: "NJ statewide parcels (MOD-IV)",
+    homepage: "https://njgin.nj.gov",
+    layer: "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Parcels_Composite_NJ_WM/FeatureServer/0",
+    bbox: { latMin: 38.9, latMax: 41.36, lngMin: -75.6, lngMax: -73.89 },
+    priceKey: "SALE_PRICE",
+    dateKey: "DEED_DATE",
+    sqftKey: null,
+    addressKeys: ["PROP_LOC", "ST_ADDRESS"],
+  },
+  {
+    // Verified 2026-08-14 (round 3): Cook County publishes sales and parcel
+    // locations separately — a two-request PIN join covers Chicago.
+    kind: "socrataJoin",
+    name: "Cook County Assessor sales (Chicago)",
+    homepage: "https://datacatalog.cookcountyil.gov/d/wvhk-k5uv",
+    parcelUrl: "https://datacatalog.cookcountyil.gov/resource/tx2p-k2g9.json",
+    pinKey: "pin",
+    latKey: "lat",
+    lonKey: "lon",
+    addressKey: "prop_address_full",
+    salesUrl: "https://datacatalog.cookcountyil.gov/resource/wvhk-k5uv.json",
+    salesPinKey: "pin",
+    priceKey: "sale_price",
+    dateKey: "sale_date",
+    sqftKey: null,
+    addressKeys: ["__addr"],
+    bbox: { latMin: 41.46, latMax: 42.16, lngMin: -88.27, lngMax: -87.52 },
+  },
 ];
 
 const RADIUS_M = 1200; // ~3/4 mile — "the area" around a dropped address
@@ -204,6 +339,8 @@ function toIsoDate(v: unknown): string | null {
   if (m) return m[0];
   const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); // mm/dd/yyyy
   if (us) return `${us[3]}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}`;
+  const compact = s.match(/^(\d{4})(\d{2})(\d{2})$/); // MassGIS "20130624"
+  if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`;
   if (/^\d{4}$/.test(s)) return `${s}-01-01`; // year-only sources
   return null;
 }
@@ -387,6 +524,50 @@ async function fetchCartoNear(src: CartoSaleSource, lat: number, lng: number): P
   return finish(raw, src, lat, lng);
 }
 
+async function fetchSocrataJoinNear(src: SocrataJoinSaleSource, lat: number, lng: number): Promise<SaleRecord[]> {
+  const dLat = RADIUS_M / 111_000;
+  const dLng = RADIUS_M / (111_000 * Math.cos((lat * Math.PI) / 180));
+  const w = `${src.latKey} > ${lat - dLat} AND ${src.latKey} < ${lat + dLat} AND ${src.lonKey} > ${lng - dLng} AND ${src.lonKey} < ${lng + dLng}`;
+  const pParams = new URLSearchParams({
+    $where: w,
+    $select: `${src.pinKey},${src.latKey},${src.lonKey},${src.addressKey}`,
+    $limit: "400",
+  });
+  const pRes = await fetch(`${src.parcelUrl}?${pParams.toString()}`, { headers: { Accept: "application/json" } });
+  if (!pRes.ok) throw new Error(`${src.name}: parcels HTTP ${pRes.status}`);
+  const parcels = (await pRes.json()) as Record<string, unknown>[];
+  const byPin = new Map<string, { lat: number; lng: number; address: string }>();
+  for (const p of parcels) {
+    const pin = String(p[src.pinKey] ?? "");
+    const pLat = num(p[src.latKey]);
+    const pLng = num(p[src.lonKey]);
+    if (!pin || !Number.isFinite(pLat) || !Number.isFinite(pLng)) continue;
+    if (!byPin.has(pin)) byPin.set(pin, { lat: pLat, lng: pLng, address: String(p[src.addressKey] ?? "").trim() });
+  }
+  if (byPin.size === 0) return [];
+  // One IN() lookup per 150 PINs keeps URLs under the server's length cap.
+  const pins = [...byPin.keys()];
+  const raw: { row: Record<string, unknown>; lat: number; lng: number }[] = [];
+  for (let i = 0; i < pins.length && i < 300; i += 150) {
+    const list = pins.slice(i, i + 150).map((p) => `'${p}'`).join(",");
+    const sParams = new URLSearchParams({
+      $where: `${src.salesPinKey} in(${list}) AND ${src.priceKey} > 40000`,
+      $order: `${src.dateKey} DESC`,
+      $limit: "150",
+    });
+    const sRes = await fetch(`${src.salesUrl}?${sParams.toString()}`, { headers: { Accept: "application/json" } });
+    if (!sRes.ok) continue; // partial coverage beats a dead panel
+    const rows = (await sRes.json()) as Record<string, unknown>[];
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) {
+      const loc = byPin.get(String(row[src.salesPinKey] ?? ""));
+      if (!loc) continue;
+      raw.push({ row: { ...row, __addr: loc.address }, lat: loc.lat, lng: loc.lng });
+    }
+  }
+  return finish(raw, src, lat, lng);
+}
+
 function covers(src: SaleSource, lat: number, lng: number): boolean {
   const b = src.bbox;
   return lat >= b.latMin && lat <= b.latMax && lng >= b.lngMin && lng <= b.lngMax;
@@ -399,6 +580,7 @@ export async function fetchSalesNear(lat: number, lng: number): Promise<SalesNea
     const records =
       src.kind === "socrata" ? await fetchSocrataNear(src, lat, lng)
       : src.kind === "carto" ? await fetchCartoNear(src, lat, lng)
+      : src.kind === "socrataJoin" ? await fetchSocrataJoinNear(src, lat, lng)
       : await fetchArcgisNear(src, lat, lng);
     return { records, sourceName: src.name, sourceUrl: src.homepage };
   } catch (e) {
