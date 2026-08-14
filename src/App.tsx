@@ -1,5 +1,6 @@
 import * as React from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useNavigate } from "react-router-dom";
+import { getSupabase } from "@/integrations/supabase/client";
 import { CrashBoundary } from "@/components/CrashBoundary";
 import { Header } from "@/components/Header";
 import { TrialBanner } from "@/components/TrialBanner";
@@ -21,6 +22,25 @@ const BillingSuccess = React.lazy(() => import("@/pages/BillingSuccess"));
 const NotFound = React.lazy(() => import("@/pages/NotFound"));
 const Library = React.lazy(() => import("@/pages/Library"));
 const Pricing = React.lazy(() => import("@/pages/Pricing"));
+const ResetPassword = React.lazy(() => import("@/pages/ResetPassword"));
+
+/**
+ * Password-recovery links land wherever Supabase's Site URL points (often
+ * "/"). Whatever page that is, the moment the token becomes a recovery
+ * session, route the user to the set-a-new-password form.
+ */
+function RecoveryRedirect() {
+  const navigate = useNavigate();
+  React.useEffect(() => {
+    const sb = getSupabase();
+    if (!sb) return;
+    const { data } = sb.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") navigate("/reset-password");
+    });
+    return () => data.subscription.unsubscribe();
+  }, [navigate]);
+  return null;
+}
 
 const PageFallback = () => (
   <div className="grid min-h-[50vh] place-items-center text-sm text-muted-foreground animate-pulse">Loading…</div>
@@ -33,6 +53,7 @@ export default function App() {
   }, []);
   return (
     <div className="flex min-h-screen flex-col">
+      <RecoveryRedirect />
       <Header />
       <TrialBanner />
       <main className="flex-1">
@@ -51,6 +72,7 @@ export default function App() {
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/sign-in" element={<SignIn />} />
           <Route path="/sign-up" element={<SignUp />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/billing/success" element={<BillingSuccess />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />

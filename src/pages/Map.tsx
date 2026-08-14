@@ -835,6 +835,46 @@ function ZoningPanel({ init, onClose, onSales }: { init: { address: string; lotS
       }, dims);
   const gov = res ? govLinksFor(res.city, res.state) : null;
 
+  // ── Mini underwrite: three levers, all editable, prefilled from REAL data
+  // only — envelope sf, calibrated build $/sf, recorded-sales sale $/sf.
+  const miniType: ProductType =
+    env.units == null || env.units <= 1 ? "SFH"
+    : env.units === 2 ? "Duplex"
+    : env.units <= 4 ? "Fourplex"
+    : "Small multi";
+  const salesPpsfMedian = React.useMemo(() => {
+    const ps = (sales?.records ?? []).map((r) => r.ppsf).filter((p): p is number => p != null).sort((a, b) => a - b);
+    return ps.length >= 4 ? ps[Math.floor(ps.length / 2)] : null;
+  }, [sales]);
+  const [miniSf, setMiniSf] = React.useState(0);
+  const [miniCost, setMiniCost] = React.useState(0);
+  const [miniSale, setMiniSale] = React.useState(0);
+  const [miniSaleFrom, setMiniSaleFrom] = React.useState<"sales" | "citywide" | "user" | null>(null);
+  // Prefills fill only empty fields — a number the user typed is never clobbered.
+  React.useEffect(() => {
+    if (env.buildableSqft != null && miniSf === 0) setMiniSf(env.buildableSqft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [env.buildableSqft]);
+  React.useEffect(() => {
+    if (res && miniCost === 0) setMiniCost(buildPpsf(res.city, miniType));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [res, miniType]);
+  React.useEffect(() => {
+    if (miniSale !== 0) return;
+    if (salesPpsfMedian) { setMiniSale(salesPpsfMedian); setMiniSaleFrom("sales"); return; }
+    if (res) {
+      const mkt = ppsfSummary(res.city);
+      if (mkt.source === "recorded" || mkt.source === "calibrated") {
+        setMiniSale(Math.round(mkt.current));
+        setMiniSaleFrom("citywide");
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [salesPpsfMedian, res]);
+  const miniArv = miniSf > 0 && miniSale > 0 ? Math.round(miniSf * miniSale) : null;
+  const miniBuild = miniSf > 0 && miniCost > 0 ? Math.round(miniSf * miniCost) : null;
+  const miniSpread = miniArv != null && miniBuild != null ? miniArv - miniBuild : null;
+
   return (
     <Drawer onClose={onClose}>
       <div className="p-6">
@@ -1136,6 +1176,40 @@ function ZoningPanel({ init, onClose, onSales }: { init: { address: string; lotS
                 )}
               </div>
             )}
+
+            <div className="rounded-md border border-gold/40 bg-card p-4">
+              <div className="stat-label flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-gold" /> Mini underwrite</div>
+              <div className="mt-2.5 grid grid-cols-3 gap-2">
+                <NumericField label="Sellable sf" value={miniSf} onChange={setMiniSf} />
+                <NumericField label="Build $/sf" value={miniCost} onChange={setMiniCost} />
+                <NumericField label="Sale $/sf" value={miniSale} onChange={(v) => { setMiniSaleFrom("user"); setMiniSale(v); }} />
+              </div>
+              <p className="mt-1.5 text-[11px] text-muted-foreground leading-relaxed">
+                {env.buildableSqft != null ? "Sellable sf prefilled from the zoning envelope. " : "Enter the sellable sf you'd build. "}
+                {miniSaleFrom === "sales" && `Sale $/sf = median of the recorded sales nearby. `}
+                {miniSaleFrom === "citywide" && `Sale $/sf = verified ${res.city} market rate. `}
+                {miniSale === 0 && "No verified sale comps here — set sale $/sf from comps you trust. "}
+                Every field is editable.
+              </p>
+              {miniArv != null && miniBuild != null && (
+                <div className="mt-2.5 space-y-0.5">
+                  <Row label={`Sells for (ARV) @ $${fmtNumber(miniSale)}/sf`} value={fmtMoney(miniArv)} />
+                  <Row label={`Build cost @ $${fmtNumber(miniCost)}/sf`} value={fmtMoney(miniBuild)} />
+                  <div className="flex items-center justify-between text-sm py-1 border-t border-border/60 mt-1 pt-1.5">
+                    <span className="font-medium text-foreground">Spread before land · financing · selling costs</span>
+                    <span className={`font-semibold tabular-nums ${miniSpread! >= 0 ? "text-emerald-600" : "text-destructive"}`}>{fmtMoney(miniSpread!)}</span>
+                  </div>
+                  <p className="pt-1 text-[11px] text-muted-foreground leading-relaxed">
+                    Gross spread only — land price, financing, and selling costs come off this in the full pro forma.
+                  </p>
+                  <Button variant="gold" className="mt-2 w-full" asChild>
+                    <Link to={`/deal-analyzer?arv=${miniArv}&costPerSqft=${miniCost}&totalSqft=${miniSf}&mode=sell&productType=${encodeURIComponent(miniType)}&address=${encodeURIComponent(res.formatted)}`}>
+                      Open the full pro forma with these numbers <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </Button>
+                </div>
+              )}
+            </div>
 
             <p className="text-[11px] text-muted-foreground leading-relaxed">
               Zoning is parcel-specific — overlays, historic districts, and deed restrictions can change
