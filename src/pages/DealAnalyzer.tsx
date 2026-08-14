@@ -328,6 +328,12 @@ function Results({ inputs, r, strategy }: { inputs: DealInputs; r: DealResults; 
           <Stat label="ARV" value={fmtMoney(inputs.arv)} big />
           <Stat label="Cash required" value={fmtMoney(r.cashRequired)} />
           <Stat label="Projected profit" value={fmtMoney(r.projectedProfit)} tone={r.projectedProfit >= 0 ? "profit" : "loss"} />
+          {inputs.landCost === 0 && (
+            <p className="col-span-2 rounded-md border border-gold/40 bg-gold-muted/30 px-3 py-2 text-[11px] leading-relaxed text-foreground/85">
+              Land cost is $0, so these results are what the project supports <em>before</em> paying
+              for land. Enter your land price on the left for the real margin.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -335,6 +341,7 @@ function Results({ inputs, r, strategy }: { inputs: DealInputs; r: DealResults; 
       <Card>
         <CardHeader><CardTitle className="text-lg">Construction</CardTitle></CardHeader>
         <CardContent className="space-y-2">
+          <Row label="Land cost" value={fmtMoney(inputs.landCost)} />
           <Row label="Hard construction" value={fmtMoney(r.hardConstruction)} />
           {r.softCosts > 0 && <Row label="Soft costs (A&E, permits, fees)" value={fmtMoney(r.softCosts)} />}
           {r.contingency > 0 && <Row label={`Contingency (${(inputs.contingencyPct * 100).toFixed(1)}%)`} value={fmtMoney(r.contingency)} />}
