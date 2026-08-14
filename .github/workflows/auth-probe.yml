@@ -1,0 +1,28 @@
+name: Auth probe
+
+# On-demand only: end-to-end check of the forgot-password flow. Verifies the
+# deployed /reset-password page, auth settings, and dispatches a REAL recovery
+# email to the founder (earliest-created) account.
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Probe the password-reset flow
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/auth-probe.mjs | tee auth-probe-report.txt
+      - name: Publish summary
+        if: always()
+        run: |
+          echo '## Auth probe' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat auth-probe-report.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
