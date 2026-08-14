@@ -15,6 +15,7 @@ import { LISTING_KINDS, LISTING_COLOR, type Listing, type ListingKind } from "@/
 import { fetchAllCityDevelopments, type LivePermits } from "@/providers/permits/socrata";
 import { track } from "@/lib/track";
 import { fetchSoldRates } from "@/providers/sold/socrataSales";
+import { fetchSalesNear, type SaleRecord, type SalesNearResult } from "@/providers/sold/salesNear";
 import { setLiveSaleRates } from "@/lib/underwrite/liveSaleRates";
 import { fetchMlsListings } from "@/providers/listings/mls";
 import { discoverCityPermits } from "@/providers/permits/discovery";
@@ -49,6 +50,12 @@ const GOOGLE_MAPS_KEY =
 // Real imagery of the actual permitted address — never a stock photo.
 const streetViewImg = (lat: number, lng: number, w = 800, h = 400) =>
   `https://maps.googleapis.com/maps/api/streetview?size=${w}x${h}&location=${lat},${lng}&fov=80&key=${GOOGLE_MAPS_KEY}`;
+
+const fmtDist = (m: number): string =>
+  m < 320 ? `${Math.round(m * 3.28084)} ft` : `${(m / 1609.34).toFixed(1)} mi`;
+
+// Recorded-sale pins — deep green, distinct from permits and listings.
+const SALE_PIN_COLOR = "#2e6e4e";
 
 type Layer = "construction" | "listings";
 type Selection =
@@ -99,6 +106,8 @@ export default function MapPage() {
   const [basemap, setBasemap] = React.useState<"streets" | "satellite" | "google">("google");
 
   const [zoning, setZoning] = React.useState<null | { address: string; lotSqft?: number; autoRun?: boolean }>(null);
+  // Recorded sales around the X-rayed address, pinned on the map.
+  const [saleMarks, setSaleMarks] = React.useState<SaleRecord[]>([]);
 
   // Watchlist — hearts persist across visits.
   const { ids: watched, toggle: toggleWatch } = useWatchlist();
@@ -322,22 +331,29 @@ export default function MapPage() {
   const pins: Pin[] = React.useMemo(() => {
     // A single bad coordinate from a live feed must never crash a map render.
     const finite = (p: { lat: number; lng: number }) => Number.isFinite(p.lat) && Number.isFinite(p.lng);
+    // Recorded sales around an X-rayed address ride on top of either layer.
+    const salePins: Pin[] = saleMarks.filter(finite).map((s) => ({
+      id: `sale-${s.id}`, lat: s.lat, lng: s.lng, color: SALE_PIN_COLOR, deal: false,
+      selected: false,
+      label: `Sold ${fmtMoney(s.price)}${s.date ? ` · ${s.date.slice(0, 7)}` : ""} · ${s.address}`,
+      onClick: () => setFly({ lat: s.lat, lng: s.lng }),
+    }));
     if (layer === "construction") {
-      return devMatches.filter(finite).map((d) => ({
+      return [...devMatches.filter(finite).map((d) => ({
         id: d.id, lat: d.lat, lng: d.lng, color: TYPE_COLOR[d.productType], deal: false,
         selected: selected?.kind === "dev" && selected.data.id === d.id,
         label: `${d.name} · ${d.productType}`,
         onClick: () => select({ kind: "dev", data: d }),
-      }));
+      })), ...salePins];
     }
-    return listingMatches.filter(finite).map((l) => ({
+    return [...listingMatches.filter(finite).map((l) => ({
       id: l.id, lat: l.lat, lng: l.lng, color: LISTING_COLOR[l.kind],
       deal: !!listingOpportunity(l).atPrice?.isDeal,
       selected: selected?.kind === "listing" && selected.data.id === l.id,
       label: `${l.kind} · ${fmtMoney(l.listPrice)}`,
       onClick: () => select({ kind: "listing", data: l }),
-    }));
-  }, [layer, devMatches, listingMatches, selected, select]);
+    })), ...salePins];
+  }, [layer, devMatches, listingMatches, selected, select, saleMarks]);
 
   return (
     <div className="flex flex-col">
@@ -550,7 +566,7 @@ export default function MapPage() {
           onClose={() => select(null)}
         />
       )}
-      {zoning && <ZoningPanel key={zoning.address || "blank"} init={zoning} onClose={() => setZoning(null)} />}
+      {zoning && <ZoningPanel key={zoning.address || "blank"} init={zoning} onClose={() => { setZoning(null); setSaleMarks([]); }} onSales={setSaleMarks} />}
       {selected?.kind === "listing" && (
         <ListingPanel
           listing={selected.data}
@@ -702,10 +718,13 @@ function ListingCard({ l, selected, watched, onWatch, onClick }: { l: Listing; s
  * (Chicago), no-zoning special case (Houston), and a works-anywhere manual
  * mode where the user types the numbers straight from their city's code.
  */
-function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: number; autoRun?: boolean }; onClose: () => void }) {
+function ZoningPanel({ init, onClose, onSales }: { init: { address: string; lotSqft?: number; autoRun?: boolean }; onClose: () => void; onSales?: (records: SaleRecord[]) => void }) {
   const [address, setAddress] = React.useState(init.address);
   const [lotSqft, setLotSqft] = React.useState(init.lotSqft ?? 0);
   const [busy, setBusy] = React.useState(false);
+  // Recorded sales around the checked address — real deed prices only.
+  const [sales, setSales] = React.useState<SalesNearResult | null>(null);
+  const [salesBusy, setSalesBusy] = React.useState(false);
   const [res, setRes] = React.useState<null | {
     formatted: string; city: string; state: string;
     cityInfo: CityZoning | null; rawZone: string | null; rules: ZoneRules | null;
@@ -765,6 +784,19 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
     // Record lookups need a street-level geocode — a city/neighborhood
     // centroid would hit some unrelated parcel and report its lot as fact.
     const streetLevel = /^\d/.test(street);
+    // Recorded sales near the point — runs alongside the zoning lookups.
+    setSales(null);
+    setSalesBusy(streetLevel);
+    onSales?.([]);
+    if (streetLevel) {
+      fetchSalesNear(geo.lat, geo.lng).then((r) => {
+        if (seq !== checkSeq.current) return;
+        setSales(r);
+        setSalesBusy(false);
+        onSales?.(r.records);
+        if (r.records.length) track("sales_near", { n: r.records.length, source: r.sourceName });
+      });
+    }
     // City zoning table + parcel record in parallel; GIS point query as backup.
     let [rawZone, parcel] = await Promise.all([
       cityInfo?.socrataZoning && streetLevel ? zoneAtAddress(cityInfo.socrataZoning, street) : Promise.resolve(null),
@@ -1050,6 +1082,59 @@ function ZoningPanel({ init, onClose }: { init: { address: string; lotSqft?: num
                   </a>
                 )}
               </>
+            )}
+
+            {(salesBusy || sales) && (
+              <div className="rounded-md border border-border bg-card p-4">
+                <div className="stat-label flex items-center gap-1.5"><Home className="h-3.5 w-3.5 text-gold" /> What's selling nearby</div>
+                {salesBusy && <p className="mt-2 text-sm text-muted-foreground">Checking recorded sales within ~¾ mile…</p>}
+                {sales && !salesBusy && (
+                  sales.sourceName === null ? (
+                    <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
+                      No county here publishes machine-readable sale records yet. Pencil shows real
+                      recorded prices only — never estimates — so we show nothing rather than a guess.
+                    </p>
+                  ) : sales.error ? (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Couldn't reach {sales.sourceName} just now — try again in a minute.
+                    </p>
+                  ) : sales.records.length === 0 ? (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      No recorded sales within ~¾ mile in {sales.sourceName}.
+                    </p>
+                  ) : (
+                    <>
+                      {(() => {
+                        const ppsfs = sales.records.map((r) => r.ppsf).filter((p): p is number => p != null).sort((a, b) => a - b);
+                        if (ppsfs.length < 4) return null;
+                        return (
+                          <p className="mt-2 text-sm">
+                            <span className="font-semibold text-foreground">${fmtNumber(ppsfs[Math.floor(ppsfs.length / 2)])}/sf median</span>
+                            <span className="text-muted-foreground"> across {ppsfs.length} recorded sales with building size on file</span>
+                          </p>
+                        );
+                      })()}
+                      <ul className="mt-2.5 divide-y divide-border/60">
+                        {sales.records.map((r) => (
+                          <li key={r.id} className="flex items-baseline justify-between gap-3 py-1.5">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm text-foreground/90">{r.address}</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {r.date ?? "date not published"} · {fmtDist(r.distanceM)} away{r.sqft ? ` · ${fmtNumber(r.sqft)} sf` : ""}{r.ppsf ? ` · $${fmtNumber(r.ppsf)}/sf` : ""}
+                              </p>
+                            </div>
+                            <span className="shrink-0 font-semibold tabular-nums text-gold">{fmtMoney(r.price)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+                        Recorded transfers from {sales.sourceName} — prices as filed in public records,
+                        not asking prices. Also pinned on the map.
+                      </p>
+                    </>
+                  )
+                )}
+              </div>
             )}
 
             <p className="text-[11px] text-muted-foreground leading-relaxed">

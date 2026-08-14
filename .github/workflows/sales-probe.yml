@@ -1,0 +1,29 @@
+name: Sales probe
+
+# On-demand only: hunts for recorded-sale (deed transfer) data sources that
+# support near-a-point queries, to power "address → what's selling nearby".
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Probe recorded-sale sources
+        run: |
+          npx --yes esbuild@0.24.2 scripts/sales-probe.ts \
+            --bundle --platform=node --format=esm --outfile=sales-probe.mjs \
+            "--alias:@=./src" "--define:import.meta.env={}"
+          node sales-probe.mjs | tee sales-probe-report.txt
+      - name: Publish summary
+        if: always()
+        run: |
+          echo '## Sales probe' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -c 60000 sales-probe-report.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
