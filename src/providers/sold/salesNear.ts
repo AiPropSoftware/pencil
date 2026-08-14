@@ -290,6 +290,19 @@ export const SALE_SOURCES: SaleSource[] = [
     addressKeys: ["PROP_LOC", "ST_ADDRESS"],
   },
   {
+    // Verified 2026-08-14 (round 4): Richmond Assessor recorded transfers —
+    // sale_price/sale_date(epoch)/prop_street (padded; trimmed client-side).
+    kind: "arcgis",
+    name: "Richmond City Assessor sales",
+    homepage: "https://www.rva.gov/assessor-real-estate",
+    layer: "https://services1.arcgis.com/k3vhq11XkBNeeOfM/arcgis/rest/services/AssessorProValGPINRecTransPublish/FeatureServer/0",
+    bbox: { latMin: 37.41, latMax: 37.62, lngMin: -77.6, lngMax: -77.38 },
+    priceKey: "sale_price",
+    dateKey: "sale_date",
+    sqftKey: null,
+    addressKeys: ["prop_street"],
+  },
+  {
     // Verified 2026-08-14 (round 3): Cook County publishes sales and parcel
     // locations separately — a two-request PIN join covers Chicago.
     kind: "socrataJoin",

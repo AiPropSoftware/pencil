@@ -59,7 +59,14 @@ export default function DealAnalyzer() {
     if (Number.isFinite(arv) && arv > 0) setInputs((p) => ({ ...p, arv }));
     if (Number.isFinite(costPerSqft) && costPerSqft > 0) setInputs((p) => ({ ...p, costPerSqft }));
     if (Number.isFinite(totalSqft) && totalSqft > 0) setInputs((p) => ({ ...p, totalSqft }));
-    if (Number.isFinite(landCost) && landCost > 0) setInputs((p) => ({ ...p, landCost }));
+    if (Number.isFinite(landCost) && landCost > 0) {
+      setInputs((p) => ({ ...p, landCost }));
+    } else if ((Number.isFinite(arv) && arv > 0) || (Number.isFinite(totalSqft) && totalSqft > 0)) {
+      // Arriving from the X-ray/mini-underwrite for a REAL address with no
+      // land price known: start land at $0 and say so — never leave the
+      // demo default in as if it were this site's number.
+      setInputs((p) => ({ ...p, landCost: 0 }));
+    }
     if (address) setInputs((p) => ({ ...p, address }));
     // Financing knobs from the map's underwrite card (decimals in the URL).
     const knob = (k: string) => { const v = params.get(k); return v == null ? null : Number(v); };

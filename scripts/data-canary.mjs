@@ -691,6 +691,7 @@ const SALES_LAYERS = [
   ["Wake Co parcels (Raleigh)", "https://maps.wake.gov/arcgis/rest/services/Property/Parcels/MapServer/0", 35.7796, -78.6382, ["TOTSALPRICE", "SITE_ADDRESS"]],
   ["Detroit authoritative parcels", "https://services2.arcgis.com/PpbvckyUgaYqseNQ/arcgis/rest/services/Detroit_MP_Parcel_Authoritative/FeatureServer/0", 42.3314, -83.0458, ["sale_price", "address"]],
   ["NJ MOD-IV composite (Newark pt)", "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Parcels_Composite_NJ_WM/FeatureServer/0", 40.7357, -74.1724, ["SALE_PRICE", "PROP_LOC"]],
+  ["Richmond VA assessor sales", "https://services1.arcgis.com/k3vhq11XkBNeeOfM/arcgis/rest/services/AssessorProValGPINRecTransPublish/FeatureServer/0", 37.5407, -77.436, ["sale_price", "prop_street"]],
 ];
 for (const [nm, layer, la, ln, fields] of SALES_LAYERS) {
   CHECKS.push({
