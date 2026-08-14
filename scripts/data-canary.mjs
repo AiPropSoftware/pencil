@@ -599,16 +599,17 @@ const CHECKS = [
   {
     name: "Nearby sales — Nashville assessor parcels (envelope)",
     async run() {
+      // Mirrors the app's exact query: bare where (the server 400s on any
+      // SalePrice filter — the client filters instead), full outFields.
       const d = await fetchJson(
         "https://maps.nashville.gov/arcgis/rest/services/Cadastral/Parcels/MapServer/0/query?f=json" +
-          "&where=" + encodeURIComponent("SalePrice > 40000") +
-          "&outFields=SalePrice,PropAddr,OwnDate,FinishArea&resultRecordCount=5&returnGeometry=false" +
+          "&where=1%3D1&outFields=*&resultRecordCount=5&returnGeometry=true&outSR=4326" +
           "&geometry=-86.8071,36.1397,-86.7971,36.1497&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects",
       );
       if (!d.features?.length) throw new Error(`no features: ${JSON.stringify(d.error || d).slice(0, 160)}`);
       const a = d.features[0].attributes || {};
-      if (a.SalePrice == null || !a.PropAddr) throw new Error("SalePrice/PropAddr missing from response");
-      return `${d.features.length} parcels, e.g. ${a.PropAddr} $${a.SalePrice}`;
+      if (!("SalePrice" in a) || !("PropAddr" in a)) throw new Error(`SalePrice/PropAddr fields drifted: ${Object.keys(a).slice(0, 14).join(",")}`);
+      return `${d.features.length} parcels, fields intact`;
     },
   },
   {
@@ -627,16 +628,21 @@ const CHECKS = [
   {
     name: "Nearby sales — Florida DOR centroids (point+distance)",
     async run() {
-      const y = new Date().getFullYear() - 2;
-      const d = await fetchJson(
+      // Mirrors the app's probe-verified query shape exactly (2026-08-14):
+      // returnGeometry+outSR+outFields=* — deviating trips an SRID bug.
+      const base =
         "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json" +
-          "&where=" + encodeURIComponent(`SALE_PRC1 > 40000 AND SALE_YR1 >= ${y}`) +
-          "&outFields=SALE_PRC1,SALE_YR1,PHY_ADDR1&resultRecordCount=3&returnGeometry=false" +
-          "&geometry=" + encodeURIComponent('{"x":-80.2036,"y":25.7907,"spatialReference":{"wkid":4326}}') +
-          "&geometryType=esriGeometryPoint&inSR=4326&distance=1200&units=esriSRUnit_Meter&spatialRel=esriSpatialRelIntersects",
-      );
-      if (!d.features?.length) throw new Error(`no features: ${JSON.stringify(d.error || d).slice(0, 160)}`);
-      return `${d.features.length} recent sales near the Miami test point`;
+        "&where=1%3D1&outFields=*&resultRecordCount=2&returnGeometry=true&outSR=4326" +
+        "&geometryType=esriGeometryPoint&inSR=4326&distance=1200&units=esriSRUnit_Meter&spatialRel=esriSpatialRelIntersects";
+      let d = await fetchJson(base + "&geometry=" + encodeURIComponent('{"x":-80.2036,"y":25.7907,"spatialReference":{"wkid":4326}}'));
+      if (!d.features?.length) {
+        // The app's last-resort geometry form.
+        d = await fetchJson(base + "&geometry=-80.2036,25.7907");
+        if (!d.features?.length) throw new Error(`no features (both forms): ${JSON.stringify(d.error || d).slice(0, 160)}`);
+      }
+      const a = d.features[0].attributes || {};
+      if (!("SALE_PRC1" in a) || !("PHY_ADDR1" in a)) throw new Error(`SALE_PRC1/PHY_ADDR1 fields drifted`);
+      return `${d.features.length} parcels near the Miami test point, fields intact`;
     },
   },
 

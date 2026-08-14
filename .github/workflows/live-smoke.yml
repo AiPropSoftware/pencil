@@ -1,0 +1,35 @@
+name: Live smoke
+
+# On-demand: drives the PRODUCTION app in a real browser — sign-up, sign-in,
+# map + live permits, address X-ray + nearby sales + mini underwrite, deal
+# analyzer, reset-password page. Screenshots uploaded as artifacts.
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install playwright (uses the runner's Chrome)
+        run: npm i --no-save playwright@1.49.1
+      - name: Smoke the live site
+        run: node scripts/live-smoke.mjs | tee live-smoke-report.txt
+      - name: Publish summary
+        if: always()
+        run: |
+          echo '## Live smoke' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat live-smoke-report.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-screenshots
+          path: smoke-*.png
+          if-no-files-found: ignore
