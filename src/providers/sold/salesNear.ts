@@ -118,7 +118,28 @@ interface SocrataJoinSaleSource {
   bbox: BBox;
 }
 
-export type SaleSource = SocrataSaleSource | ArcgisSaleSource | CartoSaleSource | SocrataJoinSaleSource;
+/** Same two-leg join as Cook County, but over a CKAN datastore SQL API. */
+interface CkanJoinSaleSource {
+  kind: "ckanJoin";
+  name: string;
+  homepage: string;
+  sqlBase: string;
+  parcelRes: string;
+  pinCol: string;
+  latCol: string;
+  lngCol: string;
+  salesRes: string;
+  salesPinCol: string;
+  priceKey: string;
+  dateKey: string;
+  /** Columns concatenated (space-joined) into the display address. */
+  addrCompose: string[];
+  sqftKey: string | null;
+  addressKeys: string[];
+  bbox: BBox;
+}
+
+export type SaleSource = SocrataSaleSource | ArcgisSaleSource | CartoSaleSource | SocrataJoinSaleSource | CkanJoinSaleSource;
 
 /** Filled ONLY with probe-verified sources — see scripts/sales-probe.ts. */
 export const SALE_SOURCES: SaleSource[] = [
@@ -303,6 +324,27 @@ export const SALE_SOURCES: SaleSource[] = [
     addressKeys: ["prop_street"],
   },
   {
+    // Verified 2026-08-14 (round 6): Allegheny County via WPRDC — the
+    // assessments table has price/date/address but no coordinates, so a
+    // Cook-style two-leg join runs over CKAN SQL (both legs live-verified).
+    kind: "ckanJoin",
+    name: "Allegheny County assessments (Pittsburgh)",
+    homepage: "https://data.wprdc.org/dataset/property-assessments",
+    sqlBase: "https://data.wprdc.org/api/3/action/datastore_search_sql",
+    parcelRes: "3fab7152-3f11-4788-8372-4c33f86ea813",
+    pinCol: "PIN",
+    latCol: "LAT",
+    lngCol: "LONG",
+    salesRes: "65855e14-549e-4992-b5be-d629afc676fa",
+    salesPinCol: "PARID",
+    priceKey: "SALEPRICE",
+    dateKey: "SALEDATE",
+    addrCompose: ["PROPERTYHOUSENUM", "PROPERTYADDRESS"],
+    sqftKey: "FINISHEDLIVINGAREA",
+    addressKeys: ["__addr"],
+    bbox: { latMin: 40.19, latMax: 40.68, lngMin: -80.36, lngMax: -79.69 },
+  },
+  {
     // Verified 2026-08-14 (round 3): Cook County publishes sales and parcel
     // locations separately — a two-request PIN join covers Chicago.
     kind: "socrataJoin",
@@ -350,7 +392,7 @@ function toIsoDate(v: unknown): string | null {
   const s = String(v);
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (m) return m[0];
-  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); // mm/dd/yyyy
+  const us = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/); // mm/dd/yyyy or mm-dd-yyyy
   if (us) return `${us[3]}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}`;
   const compact = s.match(/^(\d{4})(\d{2})(\d{2})$/); // MassGIS "20130624"
   if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`;
@@ -581,6 +623,46 @@ async function fetchSocrataJoinNear(src: SocrataJoinSaleSource, lat: number, lng
   return finish(raw, src, lat, lng);
 }
 
+async function fetchCkanJoinNear(src: CkanJoinSaleSource, lat: number, lng: number): Promise<SaleRecord[]> {
+  const dLat = RADIUS_M / 111_000;
+  const dLng = RADIUS_M / (111_000 * Math.cos((lat * Math.PI) / 180));
+  const sql1 =
+    `SELECT "${src.pinCol}","${src.latCol}","${src.lngCol}" FROM "${src.parcelRes}" ` +
+    `WHERE "${src.latCol}"::float > ${lat - dLat} AND "${src.latCol}"::float < ${lat + dLat} ` +
+    `AND "${src.lngCol}"::float > ${lng - dLng} AND "${src.lngCol}"::float < ${lng + dLng} LIMIT 400`;
+  const pRes = await fetch(`${src.sqlBase}?sql=${encodeURIComponent(sql1)}`);
+  if (!pRes.ok) throw new Error(`${src.name}: parcels HTTP ${pRes.status}`);
+  const pData = (await pRes.json()) as { result?: { records?: Record<string, unknown>[] } };
+  const byPin = new Map<string, { lat: number; lng: number }>();
+  for (const p of pData.result?.records ?? []) {
+    const pin = String(p[src.pinCol] ?? "");
+    const pLat = num(p[src.latCol]);
+    const pLng = num(p[src.lngCol]);
+    if (pin && Number.isFinite(pLat) && Number.isFinite(pLng) && !byPin.has(pin)) byPin.set(pin, { lat: pLat, lng: pLng });
+  }
+  if (byPin.size === 0) return [];
+  const pins = [...byPin.keys()];
+  const raw: { row: Record<string, unknown>; lat: number; lng: number }[] = [];
+  const cols = [...src.addrCompose, src.priceKey, src.dateKey, src.salesPinCol, ...(src.sqftKey ? [src.sqftKey] : [])]
+    .map((c) => `"${c}"`).join(",");
+  for (let i = 0; i < pins.length && i < 300; i += 150) {
+    const list = pins.slice(i, i + 150).map((p) => `'${p.replace(/'/g, "")}'`).join(",");
+    const sql2 =
+      `SELECT ${cols} FROM "${src.salesRes}" WHERE "${src.salesPinCol}" IN (${list}) ` +
+      `AND "${src.priceKey}"::float > 40000 LIMIT 150`;
+    const sRes = await fetch(`${src.sqlBase}?sql=${encodeURIComponent(sql2)}`);
+    if (!sRes.ok) continue; // partial coverage beats a dead panel
+    const sData = (await sRes.json()) as { result?: { records?: Record<string, unknown>[] } };
+    for (const row of sData.result?.records ?? []) {
+      const loc = byPin.get(String(row[src.salesPinCol] ?? ""));
+      if (!loc) continue;
+      const addr = src.addrCompose.map((c) => String(row[c] ?? "").trim()).filter(Boolean).join(" ");
+      raw.push({ row: { ...row, __addr: addr }, lat: loc.lat, lng: loc.lng });
+    }
+  }
+  return finish(raw, src, lat, lng);
+}
+
 function covers(src: SaleSource, lat: number, lng: number): boolean {
   const b = src.bbox;
   return lat >= b.latMin && lat <= b.latMax && lng >= b.lngMin && lng <= b.lngMax;
@@ -594,6 +676,7 @@ export async function fetchSalesNear(lat: number, lng: number): Promise<SalesNea
       src.kind === "socrata" ? await fetchSocrataNear(src, lat, lng)
       : src.kind === "carto" ? await fetchCartoNear(src, lat, lng)
       : src.kind === "socrataJoin" ? await fetchSocrataJoinNear(src, lat, lng)
+      : src.kind === "ckanJoin" ? await fetchCkanJoinNear(src, lat, lng)
       : await fetchArcgisNear(src, lat, lng);
     return { records, sourceName: src.name, sourceUrl: src.homepage };
   } catch (e) {

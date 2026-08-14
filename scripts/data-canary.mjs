@@ -709,6 +709,23 @@ for (const [nm, layer, la, ln, fields] of SALES_LAYERS) {
   });
 }
 CHECKS.push({
+  name: "Nearby sales — Allegheny CKAN join (Pittsburgh)",
+  async run() {
+    const sql1 =
+      'SELECT "PIN","LAT","LONG" FROM "3fab7152-3f11-4788-8372-4c33f86ea813" ' +
+      'WHERE "LAT"::float > 40.435 AND "LAT"::float < 40.447 AND "LONG"::float > -80.008 AND "LONG"::float < -79.985 LIMIT 3';
+    const p = await fetchJson("https://data.wprdc.org/api/3/action/datastore_search_sql?sql=" + encodeURIComponent(sql1));
+    const pins = (p.result?.records ?? []).map((r) => r.PIN).filter(Boolean);
+    if (!pins.length) throw new Error(`centroid leg broken: ${JSON.stringify(p.error || p).slice(0, 140)}`);
+    const sql2 =
+      `SELECT "PROPERTYADDRESS","SALEPRICE","SALEDATE" FROM "65855e14-549e-4992-b5be-d629afc676fa" ` +
+      `WHERE "PARID" IN (${pins.map((x) => `'${x}'`).join(",")}) LIMIT 3`;
+    const s = await fetchJson("https://data.wprdc.org/api/3/action/datastore_search_sql?sql=" + encodeURIComponent(sql2));
+    if (!s.result?.records?.length) throw new Error(`assessments leg broken: ${JSON.stringify(s.error || s).slice(0, 140)}`);
+    return `both legs ok (${pins.length} pins → ${s.result.records.length} assessments)`;
+  },
+});
+CHECKS.push({
   name: "Nearby sales — Cook County PIN join (Chicago)",
   async run() {
     const p = await fetchJson(
