@@ -578,6 +578,68 @@ const CHECKS = [
     },
   },
 
+  // ---- Nearby recorded sales (address search "what's selling nearby") -----
+  // Each check runs the same query shape src/providers/sold/salesNear.ts
+  // sends, at a point verified to have sales on 2026-08-14.
+  {
+    name: "Nearby sales — NYC DOF rolling sales (bbox)",
+    async run() {
+      const w =
+        "latitude > 40.667 AND latitude < 40.689 AND longitude > -73.958 AND longitude < -73.930" +
+        " AND sale_price > 40000 AND tax_class_at_time_of_sale in ('1','2')";
+      const rows = await fetchJson(
+        "https://data.cityofnewyork.us/resource/w2pb-icbu.json?$where=" +
+          encodeURIComponent(w) + "&$order=sale_date%20DESC&$limit=5",
+      );
+      if (!Array.isArray(rows) || !rows.length) throw new Error("no rows from bbox query");
+      if (!rows[0].sale_price || !rows[0].address) throw new Error(`fields drifted: ${Object.keys(rows[0]).slice(0, 12).join(",")}`);
+      return `${rows.length} sales, latest ${String(rows[0].sale_date).slice(0, 10)}`;
+    },
+  },
+  {
+    name: "Nearby sales — Nashville assessor parcels (envelope)",
+    async run() {
+      const d = await fetchJson(
+        "https://maps.nashville.gov/arcgis/rest/services/Cadastral/Parcels/MapServer/0/query?f=json" +
+          "&where=" + encodeURIComponent("SalePrice > 40000") +
+          "&outFields=SalePrice,PropAddr,OwnDate,FinishArea&resultRecordCount=5&returnGeometry=false" +
+          "&geometry=-86.8071,36.1397,-86.7971,36.1497&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects",
+      );
+      if (!d.features?.length) throw new Error(`no features: ${JSON.stringify(d.error || d).slice(0, 160)}`);
+      const a = d.features[0].attributes || {};
+      if (a.SalePrice == null || !a.PropAddr) throw new Error("SalePrice/PropAddr missing from response");
+      return `${d.features.length} parcels, e.g. ${a.PropAddr} $${a.SalePrice}`;
+    },
+  },
+  {
+    name: "Nearby sales — Philadelphia OPA (Carto radius)",
+    async run() {
+      const sql =
+        "SELECT location, sale_price, sale_date FROM opa_properties_public " +
+        "WHERE the_geom IS NOT NULL AND sale_price > 40000 " +
+        "AND ST_DWithin(the_geom::geography, ST_SetSRID(ST_MakePoint(-75.1652, 39.9526), 4326)::geography, 1200) " +
+        "ORDER BY sale_date DESC LIMIT 3";
+      const d = await fetchJson("https://phl.carto.com/api/v2/sql?q=" + encodeURIComponent(sql));
+      if (!d.rows?.length) throw new Error(`no rows: ${JSON.stringify(d.error || d).slice(0, 160)}`);
+      return `${d.rows.length} sales, latest ${String(d.rows[0].sale_date).slice(0, 10)}`;
+    },
+  },
+  {
+    name: "Nearby sales — Florida DOR centroids (point+distance)",
+    async run() {
+      const y = new Date().getFullYear() - 2;
+      const d = await fetchJson(
+        "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0/query?f=json" +
+          "&where=" + encodeURIComponent(`SALE_PRC1 > 40000 AND SALE_YR1 >= ${y}`) +
+          "&outFields=SALE_PRC1,SALE_YR1,PHY_ADDR1&resultRecordCount=3&returnGeometry=false" +
+          "&geometry=" + encodeURIComponent('{"x":-80.2036,"y":25.7907,"spatialReference":{"wkid":4326}}') +
+          "&geometryType=esriGeometryPoint&inSR=4326&distance=1200&units=esriSRUnit_Meter&spatialRel=esriSpatialRelIntersects",
+      );
+      if (!d.features?.length) throw new Error(`no features: ${JSON.stringify(d.error || d).slice(0, 160)}`);
+      return `${d.features.length} recent sales near the Miami test point`;
+    },
+  },
+
   // ---- Pipeline dependencies ----------------------------------------------
   {
     name: "US Census geocoder",

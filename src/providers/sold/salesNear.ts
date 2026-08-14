@@ -15,7 +15,10 @@ export interface SaleRecord {
   /** Street address as recorded by the county (may be terse, e.g. "123 MAIN ST"). */
   address: string;
   price: number;
-  /** ISO yyyy-mm-dd when the source publishes it, else null. */
+  /**
+   * ISO date at the precision the source publishes — "2026-06-11", or
+   * "2025-02" where the roll records only year+month (FL). Null if absent.
+   */
   date: string | null;
   /** Building sqft when the source publishes it, else null. */
   sqft: number | null;
@@ -61,9 +64,19 @@ interface ArcgisSaleSource {
   priceKey: string;
   /** Field name; ArcGIS dates arrive as epoch ms or strings — both handled. */
   dateKey: string | null;
+  /** Composes a date the layer splits across fields (e.g. FL year+month). */
+  dateFrom?: (row: Record<string, unknown>) => string | null;
   sqftKey: string | null;
   addressKeys: string[];
+  /** $RECENT_YEAR is replaced with (current year - 2) at query time. */
   where?: string;
+  /**
+   * Probe-verified query shape: Nashville's MapServer answers envelopes,
+   * Florida's hosted layer 400s on envelopes but answers point+distance.
+   */
+  queryStyle?: "envelope" | "distance";
+  /** Server-side newest-first; dropped automatically if the server rejects it. */
+  orderBy?: string;
 }
 
 interface CartoSaleSource {
@@ -101,6 +114,64 @@ export const SALE_SOURCES: SaleSource[] = [
     // Tax class 1-2 = residential / primarily residential; price floor
     // drops the $0 and $10 family/quitclaim transfers.
     where: "sale_price > 40000 AND tax_class_at_time_of_sale in ('1','2')",
+  },
+  {
+    // Verified 2026-08-14: envelope query works on the Metro MapServer;
+    // SalePrice/PropAddr/FinishArea/OwnDate confirmed in the live schema.
+    // OwnDate = when the current owner took title, i.e. the sale date.
+    kind: "arcgis",
+    name: "Metro Nashville / Davidson Co. Assessor parcels",
+    homepage: "https://maps.nashville.gov/ParcelViewer/",
+    layer: "https://maps.nashville.gov/arcgis/rest/services/Cadastral/Parcels/MapServer/0",
+    bbox: { latMin: 35.96, latMax: 36.42, lngMin: -87.06, lngMax: -86.51 },
+    priceKey: "SalePrice",
+    dateKey: "OwnDate",
+    sqftKey: "FinishArea",
+    addressKeys: ["PropAddr"],
+    where: "SalePrice > 40000",
+    queryStyle: "envelope",
+    orderBy: "OwnDate DESC",
+  },
+  {
+    // Verified 2026-08-14: PostGIS radius query returns live rows
+    // (sale_price/sale_date/total_livable_area/location + lat/lng).
+    kind: "carto",
+    name: "Philadelphia OPA property records",
+    homepage: "https://opendataphilly.org/datasets/opa-property-assessments/",
+    sqlBase: "https://phl.carto.com/api/v2/sql",
+    sqlTemplate:
+      "SELECT location, sale_price, sale_date, total_livable_area, ST_Y(the_geom) AS lat, ST_X(the_geom) AS lng " +
+      "FROM opa_properties_public WHERE the_geom IS NOT NULL AND sale_price > 40000 " +
+      "AND ST_DWithin(the_geom::geography, ST_SetSRID(ST_MakePoint($LNG, $LAT), 4326)::geography, $RADIUS) " +
+      "ORDER BY sale_date DESC LIMIT 250",
+    bbox: { latMin: 39.86, latMax: 40.14, lngMin: -75.29, lngMax: -74.95 },
+    priceKey: "sale_price",
+    dateKey: "sale_date",
+    sqftKey: "total_livable_area",
+    addressKeys: ["location"],
+  },
+  {
+    // Verified 2026-08-14: the state's own parcel roll, every FL county.
+    // Envelope queries 400 on this hosted layer; point+distance works.
+    // The roll publishes sale year+month only, so dates show as "2025-02".
+    kind: "arcgis",
+    name: "Florida DOR statewide parcel roll",
+    homepage: "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0",
+    layer: "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Parcel_Centroid_Version/FeatureServer/0",
+    bbox: { latMin: 24.4, latMax: 31.05, lngMin: -87.65, lngMax: -79.9 },
+    priceKey: "SALE_PRC1",
+    dateKey: null,
+    dateFrom: (r) => {
+      const y = Number(r.SALE_YR1);
+      const m = Number(r.SALE_MO1);
+      if (!Number.isFinite(y) || y < 1900 || y > 2100) return null;
+      return Number.isFinite(m) && m >= 1 && m <= 12 ? `${y}-${String(m).padStart(2, "0")}` : String(y);
+    },
+    sqftKey: "TOT_LVG_AR",
+    addressKeys: ["PHY_ADDR1"],
+    where: "SALE_PRC1 > 40000 AND SALE_YR1 >= $RECENT_YEAR",
+    queryStyle: "distance",
+    orderBy: "SALE_YR1 DESC",
   },
 ];
 
@@ -164,7 +235,10 @@ function finish(
     if (dist > RADIUS_M * 1.4) continue; // envelope corners overshoot the circle
     const sqftRaw = src.sqftKey ? num(row[src.sqftKey]) : NaN;
     const sqft = Number.isFinite(sqftRaw) && sqftRaw >= 200 ? Math.round(sqftRaw) : null;
-    const date = src.dateKey ? toIsoDate(row[src.dateKey]) : null;
+    const date =
+      src.kind === "arcgis" && src.dateFrom ? src.dateFrom(row)
+      : src.dateKey ? toIsoDate(row[src.dateKey])
+      : null;
     const address = firstText(row, src.addressKeys);
     if (!address) continue; // a price with no address helps no one
     out.push({
@@ -198,9 +272,15 @@ async function fetchSocrataNear(src: SocrataSaleSource, lat: number, lng: number
   if (src.where) clauses.push(`(${src.where})`);
   const params = new URLSearchParams({ $where: clauses.join(" AND "), $limit: "250" });
   if (src.dateKey) params.set("$order", `${src.dateKey} DESC`);
+  // Degradation ladder: order → extra where (the bbox clause always stays —
+  // finish() re-filters price/sort client-side, so nothing is lost but speed).
   let res = await fetch(`${src.url}?${params.toString()}`, { headers: { Accept: "application/json" } });
   if (res.status === 400 && src.dateKey) {
     params.delete("$order");
+    res = await fetch(`${src.url}?${params.toString()}`, { headers: { Accept: "application/json" } });
+  }
+  if (res.status === 400 && src.where) {
+    params.set("$where", clauses[0]);
     res = await fetch(`${src.url}?${params.toString()}`, { headers: { Accept: "application/json" } });
   }
   if (!res.ok) throw new Error(`${src.name}: HTTP ${res.status}`);
@@ -224,27 +304,50 @@ async function fetchSocrataNear(src: SocrataSaleSource, lat: number, lng: number
 }
 
 async function fetchArcgisNear(src: ArcgisSaleSource, lat: number, lng: number): Promise<SaleRecord[]> {
-  const dLat = RADIUS_M / 111_000;
-  const dLng = RADIUS_M / (111_000 * Math.cos((lat * Math.PI) / 180));
-  const env = JSON.stringify({ xmin: lng - dLng, ymin: lat - dLat, xmax: lng + dLng, ymax: lat + dLat });
   const params = new URLSearchParams({
     f: "json",
-    where: src.where ?? "1=1",
+    where: (src.where ?? "1=1").replace("$RECENT_YEAR", String(new Date().getFullYear() - 2)),
     outFields: "*",
     resultRecordCount: "250",
     returnGeometry: "true",
     outSR: "4326",
-    geometry: env,
-    geometryType: "esriGeometryEnvelope",
     inSR: "4326",
     spatialRel: "esriSpatialRelIntersects",
   });
-  const res = await fetch(`${src.layer}/query?${params.toString()}`);
-  if (!res.ok) throw new Error(`${src.name}: HTTP ${res.status}`);
-  const data = (await res.json()) as {
+  if (src.queryStyle === "distance") {
+    params.set("geometryType", "esriGeometryPoint");
+    params.set("geometry", JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } }));
+    params.set("distance", String(RADIUS_M));
+    params.set("units", "esriSRUnit_Meter");
+  } else {
+    const dLat = RADIUS_M / 111_000;
+    const dLng = RADIUS_M / (111_000 * Math.cos((lat * Math.PI) / 180));
+    params.set("geometryType", "esriGeometryEnvelope");
+    params.set("geometry", `${lng - dLng},${lat - dLat},${lng + dLng},${lat + dLat}`);
+  }
+  if (src.orderBy) params.set("orderByFields", src.orderBy);
+
+  type ArcResp = {
     features?: { attributes?: Record<string, unknown>; geometry?: { x?: number; y?: number; rings?: number[][][] } }[];
     error?: { message?: string };
   };
+  const run = async (): Promise<ArcResp> => {
+    const res = await fetch(`${src.layer}/query?${params.toString()}`);
+    if (!res.ok) throw new Error(`${src.name}: HTTP ${res.status}`);
+    return (await res.json()) as ArcResp;
+  };
+  // Degradation ladder (same philosophy as the permit connectors): the where/
+  // orderBy are server-side optimizations only — finish() re-filters and
+  // re-sorts client-side, so dropping them changes nothing but efficiency.
+  let data = await run();
+  if (!data.features && src.orderBy) {
+    params.delete("orderByFields");
+    data = await run();
+  }
+  if (!data.features && params.get("where") !== "1=1") {
+    params.set("where", "1=1");
+    data = await run();
+  }
   if (!data.features) throw new Error(`${src.name}: ${data.error?.message ?? "no features"}`);
   const raw = data.features
     .map((f) => {
